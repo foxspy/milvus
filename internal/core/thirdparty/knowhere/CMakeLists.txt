@@ -18,7 +18,7 @@ if ( DEFINED ENV{MILVUS_KNOWHERE_URL} )
     set( KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}" )
 else ()
     set( KNOWHERE_SOURCE_URL
-        "https://github.com/foxspy/milvus-knowhere/archive/refs/tags/${KNOWHERE_VERSION}.tar.gz" )
+        "https://github.com/milvus-io/knowhere/archive/refs/tags/${KNOWHERE_VERSION}.tar.gz" )
 endif ()
 
 macro(build_knowhere)
