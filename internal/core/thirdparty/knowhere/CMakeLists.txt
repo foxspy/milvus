@@ -11,14 +11,14 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( KNOWHERE_VERSION v1.1.14 )
-set( KNOWHERE_SOURCE_MD5 "de9303c3f667662aa92f3676a1f6ef96")
+set( KNOWHERE_VERSION v1.1.15 )
+set( KNOWHERE_SOURCE_MD5 "0f122af59a5495abda64854d23e7b258")
 
 if ( DEFINED ENV{MILVUS_KNOWHERE_URL} )
     set( KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}" )
 else ()
     set( KNOWHERE_SOURCE_URL
-        "https://github.com/milvus-io/knowhere/archive/refs/tags/${KNOWHERE_VERSION}.tar.gz" )
+        "https://github.com/foxspy/milvus-knowhere/archive/refs/tags/${KNOWHERE_VERSION}.tar.gz" )
 endif ()
 
 macro(build_knowhere)
