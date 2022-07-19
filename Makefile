@@ -23,6 +23,8 @@ mode = Release
 
 all: build-cpp build-go
 
+gpu: build-cpp-gpu build-go
+
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
 
@@ -113,6 +115,10 @@ build-go: milvus
 build-cpp: 
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+
+build-cpp-gpu: 
+	@echo "Building Milvus cpp library with gpu support ..."
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f -g "$(CUSTOM_THIRDPARTY_PATH)")
 
 build-cpp-embd: 
 	@echo "Building **Embedded** Milvus cpp library ..."

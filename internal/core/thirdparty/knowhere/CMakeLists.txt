@@ -25,10 +25,15 @@ macro(build_knowhere)
     message(STATUS "Building knowhere-${KNOWHERE_VERSION} from source")
     set (KNOWHERE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
 
+    if(KNOWHERE_GPU_VERSION OR MILVUS_GPU_VERSION)
+       set( KNOWHERE_GPU_SUPPORT ON)
+    endif()
+
     set(KNOWHERE_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
             -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_INSTALL_PREFIX=${KNOWHERE_INSTALL_PREFIX}
+            -DKNOWHERE_GPU_VERSION=${KNOWHERE_GPU_SUPPORT}
             )
 
     externalproject_add(knowhere_ep
