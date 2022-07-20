@@ -111,6 +111,14 @@ milvus-gpu:print-build-info
 		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
 		${APPLE_SILICON_FLAG} -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
+milvus-gpu:print-build-info
+	@echo "Building Milvus with GPU support ..."
+	@echo "if build fails on Mac M1 machines, you probably need to rerun scripts/install_deps.sh and then run: \`export PKG_CONFIG_PATH=\"/opt/homebrew/opt/openssl@3/lib/pkgconfig\"\`"
+	@source $(PWD)/scripts/setenv.sh && \
+		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
+		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
+		${APPLE_SILICON_FLAG} -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
+
 embd-milvus: build-cpp-embd print-build-info
 	@echo "Building **Embedded** Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
@@ -131,7 +139,7 @@ build-cpp-gpu:
 <<<<<<< HEAD
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -f "$(CUSTOM_THIRDPARTY_PATH)")
 =======
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -f "$(CUSTOM_THIRDPARTY_PATH)") 
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -f "$(CUSTOM_THIRDPARTY_PATH)")
 >>>>>>> 52e7f05c9 (fix makefile)
 
 build-cpp-embd:
