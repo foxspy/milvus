@@ -34,6 +34,7 @@ macro(build_knowhere)
             -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_INSTALL_PREFIX=${KNOWHERE_INSTALL_PREFIX}
             -DKNOWHERE_GPU_VERSION=${KNOWHERE_GPU_SUPPORT}
+            -DCMAKE_CUDA_COMPILER=${CMAKE_CUDA_COMPILER}
             )
 
     externalproject_add(knowhere_ep
