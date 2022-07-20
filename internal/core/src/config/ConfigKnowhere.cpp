@@ -34,6 +34,8 @@ KnowhereInitImpl(const char* conf_file) {
         knowhere::KnowhereConfig::SetLogHandler();
         knowhere::KnowhereConfig::SetStatisticsLevel(0);
 
+        knowhere::KnowhereConfig::InitGPUResource({0});
+
 #ifdef EMBEDDED_MILVUS
         // always disable all logs for embedded milvus.
         el::Configurations el_conf;
