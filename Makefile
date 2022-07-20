@@ -118,7 +118,7 @@ build-cpp:
 
 build-cpp-gpu: 
 	@echo "Building Milvus cpp library with gpu support ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f -g "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -f "$(CUSTOM_THIRDPARTY_PATH)") 
 
 build-cpp-embd: 
 	@echo "Building **Embedded** Milvus cpp library ..."
