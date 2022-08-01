@@ -11,8 +11,8 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( KNOWHERE_VERSION v1.1.14 )
-set( KNOWHERE_SOURCE_MD5 "de9303c3f667662aa92f3676a1f6ef96")
+set( KNOWHERE_VERSION v1.1.16 )
+set( KNOWHERE_SOURCE_MD5 "6791ed10ac45fc8bcca546ff526d8be2")
 
 if ( DEFINED ENV{MILVUS_KNOWHERE_URL} )
     set( KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}" )
@@ -25,10 +25,16 @@ macro(build_knowhere)
     message(STATUS "Building knowhere-${KNOWHERE_VERSION} from source")
     set (KNOWHERE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
 
+    if(KNOWHERE_GPU_VERSION OR MILVUS_GPU_VERSION)
+       set( KNOWHERE_GPU_SUPPORT ON)
+    endif()
+
     set(KNOWHERE_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
             -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_INSTALL_PREFIX=${KNOWHERE_INSTALL_PREFIX}
+            -DKNOWHERE_GPU_VERSION=${KNOWHERE_GPU_SUPPORT}
+            -DCMAKE_CUDA_COMPILER=${CMAKE_CUDA_COMPILER}
             )
 
     externalproject_add(knowhere_ep
