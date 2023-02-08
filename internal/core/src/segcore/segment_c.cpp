@@ -31,7 +31,12 @@ NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
     switch (seg_type) {
         case Growing: {
             auto seg = milvus::segcore::CreateGrowingSegment(col->get_schema(), segment_id);
-            seg->disable_small_index();
+            if (col->get_collection_name().find("small_index") == std::string::npos) {
+                LOG_SEGCORE_DEBUG_ << "disable small index for collection " << col->get_collection_name();
+                seg->disable_small_index();
+            } else {
+                LOG_SEGCORE_DEBUG_ << "enable small index for collection " << col->get_collection_name();
+            }
             segment = std::move(seg);
             break;
         }

@@ -17,6 +17,8 @@
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
+#include "utils/TimeProfiler.h"
+#include "log/Log.h"
 
 namespace milvus::segcore {
 
@@ -334,6 +336,7 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
                                  Timestamp timestamp,
                                  const BitsetView& bitset,
                                  SearchResult& output) const {
+    TimeProfiler("SegmentGrowingImpl.vector_search");
     AssertInfo(is_system_field_ready(), "System field is not ready");
     auto field_id = search_info.field_id_;
     auto& field_meta = schema_->operator[](field_id);
@@ -342,15 +345,20 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
     if (get_bit(index_ready_bitset_, field_id)) {
         AssertInfo(vector_indexings_.is_ready(field_id),
                    "vector indexes isn't ready for field " + std::to_string(field_id.get()));
+        LOG_SEGCORE_DEBUG_ << "Sealed SearchOnSealedIndex" << this->get_segment_id();
         query::SearchOnSealedIndex(*schema_, vector_indexings_, search_info, query_data, query_count, bitset, output);
     } else {
         AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                    "Field Data is not loaded: " + std::to_string(field_id.get()));
         AssertInfo(row_count_opt_.has_value(), "Can't get row count value");
         auto row_count = row_count_opt_.value();
+        LOG_SEGCORE_DEBUG_ << "Sealed SearchOnSealed" << this->get_segment_id();
         query::SearchOnSealed(*schema_, insert_record_, search_info, query_data, query_count, row_count, bitset,
                               output);
     }
+    LOG_SEGCORE_DEBUG_<<TimeProfiler::report();
+    TimeProfiler::clear();
+
 }
 
 void

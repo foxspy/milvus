@@ -174,6 +174,11 @@ class IndexingRecord {
         return *field_indexings_.at(field_id);
     }
 
+    void remove_field_index(FieldId field_id) {
+        Assert(field_indexings_.count(field_id));
+        field_indexings_.erase(field_id);
+    }
+
     const VectorFieldIndexing&
     get_vec_field_indexing(FieldId field_id) const {
         auto& field_indexing = get_field_indexing(field_id);

@@ -21,6 +21,9 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
 
+#include "utils/TimeProfiler.h"
+#include "log/Log.h"
+
 namespace milvus::segcore {
 
 int64_t
@@ -56,6 +59,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            const int64_t* row_ids,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
+    TimeProfiler("SegmentGrowingImpl.Insert");
     AssertInfo(insert_data->num_rows() == size, "Entities_raw count not equal to insert size");
     //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
     //               "num fields of insert data not equal to num of schema fields");
@@ -179,13 +183,18 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
                                   SearchResult& output) const {
+    TimeProfiler("SegmentGrowingImpl.vector_search");
     auto& sealed_indexing = this->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(search_info.field_id_)) {
+        LOG_SEGCORE_DEBUG_ << "Growing SearchOnSealedIndex" << this->get_segment_id();
         query::SearchOnSealedIndex(this->get_schema(), sealed_indexing, search_info, query_data, query_count, bitset,
                                    output);
     } else {
+        LOG_SEGCORE_DEBUG_ << "Growing SearchOnGrowing" << this->get_segment_id();
         query::SearchOnGrowing(*this, search_info, query_data, query_count, timestamp, bitset, output);
     }
+    LOG_SEGCORE_DEBUG_<<TimeProfiler::report();
+    TimeProfiler::clear();
 }
 
 std::unique_ptr<DataArray>

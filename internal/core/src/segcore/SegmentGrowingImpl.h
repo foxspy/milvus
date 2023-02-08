@@ -124,6 +124,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     disable_small_index() override {
         enable_small_index_ = false;
+        for (auto& [field_id, field_meta] : schema_->get_fields()) {
+            if (field_meta.is_vector() && field_meta.get_metric_type().has_value()) {
+                indexing_record_.remove_field_index(field_id);
+            }
+        }
     }
 
     int64_t
