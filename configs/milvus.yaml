@@ -65,7 +65,7 @@ mysql:
 
 # please adjust in embedded Milvus: /tmp/milvus/data/
 localStorage:
-  path: /var/lib/milvus/data/
+  path: /home/liang/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
@@ -119,7 +119,7 @@ kafka:
 
 rocksmq:
   # please adjust in embedded Milvus: /tmp/milvus/rdb_data
-  path: /var/lib/milvus/rdb_data # The path where the message is stored in rocksmq
+  path: /home/liang/milvus/data/rdb_data # The path where the message is stored in rocksmq
   rocksmqPageSize: 2147483648 # 2 GB, 2 * 1024 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
   retentionTimeInMinutes: 7200 # 5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
@@ -207,7 +207,7 @@ queryNode:
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
   # Segcore will divide a segment into multiple chunks to enbale small index
   segcore:
-    chunkRows: 1024 # The number of vectors in a chunk.
+    chunkRows: 32768 # The number of vectors in a chunk.
     # Note: we have disabled segment small index since @2022.05.12. So below related configurations won't work.
     # We won't create small index for growing segments and search on these segments will directly use bruteforce scan.
     smallIndex:
@@ -272,7 +272,7 @@ dataCoord:
     # Minimum proportion for a segment which can be sealed.
     # Sealing early can prevent producing large growing segments in case these segments might slow down our search/query.
     # Segments that sealed early will be compacted into a larger segment (within maxSize) eventually.
-    sealProportion: 0.23
+    sealProportion: 1
     assignmentExpiration: 2000 # The time of the assignment expiration in ms
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
     # If a segment didn't accept dml records in `maxIdleTime` and the size of segment is greater than
