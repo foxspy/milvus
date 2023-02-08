@@ -267,7 +267,7 @@ dataCoord:
     maxWatchDuration: 60 # Timeout on watching channels (in seconds). Default 60 seconds.
 
   segment:
-    maxSize: 512 # Maximum size of a segment in MB
+    maxSize: 2048 # Maximum size of a segment in MB
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
     # Minimum proportion for a segment which can be sealed.
     # Sealing early can prevent producing large growing segments in case these segments might slow down our search/query.
@@ -277,7 +277,7 @@ dataCoord:
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
     # If a segment didn't accept dml records in `maxIdleTime` and the size of segment is greater than
     # `minSizeFromIdleToSealed`, Milvus will automatically seal it.
-    maxIdleTime: 600 # The max idle time of segment in seconds, 10*60.
+    maxIdleTime: 60000 # The max idle time of segment in seconds, 10*60.
     minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
     smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
     # (smallProportion * segment max # of rows).
