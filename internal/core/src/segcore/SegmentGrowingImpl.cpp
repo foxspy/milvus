@@ -59,7 +59,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            const int64_t* row_ids,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
-    TimeProfiler("SegmentGrowingImpl.Insert");
+    PROFILING("SegmentGrowingImpl.Insert");
     AssertInfo(insert_data->num_rows() == size, "Entities_raw count not equal to insert size");
     //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
     //               "num fields of insert data not equal to num of schema fields");
@@ -183,7 +183,7 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
                                   SearchResult& output) const {
-    TimeProfiler("SegmentGrowingImpl.vector_search");
+    PROFILING("SegmentGrowingImpl.vector_search");
     auto& sealed_indexing = this->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(search_info.field_id_)) {
         LOG_SEGCORE_DEBUG_ << "Growing SearchOnSealedIndex" << this->get_segment_id();

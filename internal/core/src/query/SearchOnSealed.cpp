@@ -15,6 +15,7 @@
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/helper.h"
+#include "log/Log.h"
 
 namespace milvus::query {
 
@@ -47,7 +48,13 @@ SearchOnSealedIndex(const Schema& schema,
         knowhere::SetMetaMetricType(conf, field_indexing->metric_type_);
         auto vec_index = dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
         auto index_type = vec_index->GetIndexType();
-        return vec_index->Query(ds, search_info, bitset);
+        LOG_SEGCORE_DEBUG_<<"search on segment with "<<vec_index->GetIndexType() << " index ";
+        auto enter_time_ = std::chrono::steady_clock::now();
+        auto res = vec_index->Query(ds, search_info, bitset);
+        auto exit_time_ = std::chrono::steady_clock::now();
+        auto cost = std::chrono::duration_cast<std::chrono::nanoseconds>(exit_time_ - enter_time_).count();
+        LOG_SEGCORE_DEBUG_<<"search on segment with "<<vec_index->GetIndexType() << " index cost "<< cost/1000000.0<<" ms ";
+        return res;
     }();
 
     auto ids = final->seg_offsets_.data();
@@ -88,7 +95,12 @@ SearchOnSealed(const Schema& schema,
     auto chunk_data = vec_data->get_chunk_data(0);
 
     CheckBruteForceSearchParam(field, search_info);
+    LOG_SEGCORE_DEBUG_<<"search on segment with BF";
+    auto enter_time_ = std::chrono::steady_clock::now();
     auto sub_qr = BruteForceSearch(dataset, chunk_data, row_count, bitset);
+    auto exit_time_ = std::chrono::steady_clock::now();
+    auto cost = std::chrono::duration_cast<std::chrono::nanoseconds>(exit_time_ - enter_time_).count();
+    LOG_SEGCORE_DEBUG_<<"search on segment with BF " << " cost "<< cost/1000000.0<<" ms ";
 
     result.distances_ = std::move(sub_qr.mutable_distances());
     result.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());

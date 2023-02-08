@@ -84,8 +84,8 @@ class TimeProfiler {
 #endif
 };
 #ifdef ENABLE_PROFILING
-#define PROFILING(X) cardinal::TimeProfiler profile(X)
-#define PROFILING_SCOPE(X) cardinal::TimeProfiler profile_scope(X)
+#define PROFILING(X) milvus::segcore::TimeProfiler profile(X)
+#define PROFILING_SCOPE(X) milvus::segcore::TimeProfiler profile_scope(X)
 #else
 #define PROFILING(X) ;
 #define PROFILING_SCOPE(X) ;

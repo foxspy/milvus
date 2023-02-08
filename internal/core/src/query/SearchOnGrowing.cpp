@@ -15,6 +15,7 @@
 #include "SearchOnGrowing.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
+#include "log/Log.h"
 
 namespace milvus::query {
 
@@ -44,6 +45,7 @@ FloatIndexSearch(const segcore::SegmentGrowingImpl& segment,
 
     int current_chunk_id = 0;
     if (indexing_record.is_in(vecfield_id)) {
+        auto enter_time_ = std::chrono::steady_clock::now();
         auto max_indexed_id = indexing_record.get_finished_ack();
         const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_id);
         auto search_params = field_indexing.get_search_params(info.topk_);
@@ -54,6 +56,7 @@ FloatIndexSearch(const segcore::SegmentGrowingImpl& segment,
 
         auto size_per_chunk = field_indexing.get_size_per_chunk();
         for (int chunk_id = current_chunk_id; chunk_id < max_indexed_id; ++chunk_id) {
+            LOG_SEGCORE_DEBUG_<<"search on chunk index ["<<segment.get_segment_id()<<" , "<<chunk_id<<"]";
             if ((chunk_id + 1) * size_per_chunk > ins_barrier) {
                 break;
             }
@@ -73,6 +76,9 @@ FloatIndexSearch(const segcore::SegmentGrowingImpl& segment,
             results.merge(sub_qr);
             current_chunk_id++;
         }
+        auto exit_time_ = std::chrono::steady_clock::now();
+        auto cost = std::chrono::duration_cast<std::chrono::nanoseconds>(exit_time_ - enter_time_).count();
+        LOG_SEGCORE_DEBUG_<<"search on chunk index cost "<< cost/1000000.0<<" ms ";
     }
     return current_chunk_id;
 }
@@ -115,6 +121,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
     auto max_chunk = upper_div(active_count, vec_size_per_chunk);
 
+    auto enter_time_ = std::chrono::steady_clock::now();
     for (int chunk_id = current_chunk_id; chunk_id < max_chunk; ++chunk_id) {
         auto chunk_data = vec_ptr->get_chunk_data(chunk_id);
 
@@ -124,6 +131,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
         auto sub_view = bitset.subview(element_begin, size_per_chunk);
         CheckBruteForceSearchParam(field, info);
+        LOG_SEGCORE_DEBUG_<<"search on chunk with bf ["<<segment.get_segment_id()<<" , "<<chunk_id<<"]";
         auto sub_qr = BruteForceSearch(search_dataset, chunk_data, size_per_chunk, sub_view);
 
         // convert chunk uid to segment uid
@@ -134,6 +142,9 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         }
         final_qr.merge(sub_qr);
     }
+    auto exit_time_ = std::chrono::steady_clock::now();
+    auto cost = std::chrono::duration_cast<std::chrono::nanoseconds>(exit_time_ - enter_time_).count();
+    LOG_SEGCORE_DEBUG_<<"search on chunk with bf cost "<< cost/1000000.0<<" ms ";
     results.distances_ = std::move(final_qr.mutable_distances());
     results.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
     results.unity_topK_ = topk;
