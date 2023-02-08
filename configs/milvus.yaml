@@ -259,7 +259,7 @@ indexNode:
 dataCoord:
   address: localhost
   port: 13333
-  enableCompaction: true # Enable data segment compaction
+  enableCompaction: false # Enable data segment compaction
   enableGarbageCollection: true
   enableActiveStandby: false  # Enable active-standby
 
