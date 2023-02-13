@@ -17,6 +17,7 @@
 #include "common/Types.h"
 #include "exceptions/EasyAssert.h"
 #include "utils/Json.h"
+#include "log/Log.h"
 
 namespace milvus::segcore {
 
@@ -31,9 +32,6 @@ class SegcoreConfig {
     SegcoreConfig() {
         // hard code configurations for small index
         SmallIndexConf sub_conf;
-        sub_conf.build_params["nlist"] = std::to_string(nlist_);
-        sub_conf.search_params["nprobe"] = nprobe_;
-        sub_conf.index_type = "IVF";
         table_[knowhere::metric::L2] = sub_conf;
         table_[knowhere::metric::IP] = sub_conf;
     }
@@ -44,6 +42,25 @@ class SegcoreConfig {
         // TODO: remove this when go side is ready
         static SegcoreConfig config;
         return config;
+    }
+
+    static SegcoreConfig
+    gen_index_config(const std::string index_type) {
+        SegcoreConfig config;
+        if (index_type == "hnsw") {
+            config.set_index_type(knowhere::IndexEnum::INDEX_HNSW);
+        } else if (index_type == "ivfflat") {
+            config.set_index_type(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
+            LOG_SEGCORE_DEBUG_ << "set config type : "<< knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+        } else if (index_type == "scann") {
+            config.set_index_type("SCANN");
+        }
+        return config;
+    }
+
+    const char*
+    get_index_type() const {
+        return vec_index_type_;
     }
 
     void
@@ -80,11 +97,17 @@ class SegcoreConfig {
         table_[metric_type] = small_index_conf;
     }
 
+    void
+    set_index_type(const char * index_type) {
+        vec_index_type_ = index_type;
+    }
+
  private:
     int64_t chunk_rows_ = 32 * 1024;
     int64_t nlist_ = 100;
     int64_t nprobe_ = 4;
     std::map<knowhere::MetricType, SmallIndexConf> table_;
+    const char* vec_index_type_;
 };
 
 }  // namespace milvus::segcore

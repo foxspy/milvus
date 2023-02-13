@@ -33,7 +33,7 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vec
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         const auto& chunk = source->get_chunk(chunk_id);
-        auto indexing = std::make_unique<index::VectorMemNMIndex>(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+        auto indexing = std::make_unique<index::VectorMemNMIndex>(segcore_config_.get_index_type(),
                                                                   knowhere::metric::L2, IndexMode::MODE_CPU);
         auto dataset = knowhere::GenDataset(source->get_size_per_chunk(), dim, chunk.data());
         indexing->BuildWithDataset(dataset, conf);
@@ -49,11 +49,17 @@ VectorFieldIndexing::get_build_params() const {
     auto& metric_type = type_opt.value();
     auto& config = segcore_config_.at(metric_type);
     auto base_params = config.build_params;
-
-    AssertInfo(base_params.count("nlist"), "Can't get nlist from index params");
     base_params[knowhere::meta::DIM] = std::to_string(field_meta_.get_dim());
     base_params[knowhere::meta::METRIC_TYPE] = metric_type;
-
+    const char* vector_index_type_ = segcore_config_.get_index_type();
+    //AssertInfo(base_params.count("nlist"), "Can't get nlist from index params");
+    if (vector_index_type_ == knowhere::IndexEnum::INDEX_HNSW) {
+        base_params[knowhere::indexparam::EFCONSTRUCTION] = "200";
+        base_params[knowhere::indexparam::HNSW_M] = "16";
+    } else if (vector_index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+        base_params["nlist"] = std::to_string(128);
+    } else if (vector_index_type_ == "SCANN") {
+    }
     return base_params;
 }
 

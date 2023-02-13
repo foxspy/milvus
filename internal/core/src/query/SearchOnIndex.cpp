@@ -11,6 +11,7 @@
 
 #include "SearchOnIndex.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "log/Log.h"
 
 namespace milvus::query {
 SubSearchResult

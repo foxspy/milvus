@@ -65,7 +65,7 @@ mysql:
 
 # please adjust in embedded Milvus: /tmp/milvus/data/
 localStorage:
-  path: /home/liang/milvus/data/
+  path: /Users/xianliang/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
@@ -119,7 +119,7 @@ kafka:
 
 rocksmq:
   # please adjust in embedded Milvus: /tmp/milvus/rdb_data
-  path: /home/liang/milvus/data/rdb_data # The path where the message is stored in rocksmq
+  path: /Users/xianliang/milvus/data/rdb_data # The path where the message is stored in rocksmq
   rocksmqPageSize: 2147483648 # 2 GB, 2 * 1024 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
   retentionTimeInMinutes: 7200 # 5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
@@ -285,7 +285,7 @@ dataCoord:
     # over (compactableProportion * segment max # of rows) rows.
 
   compaction:
-    enableAutoCompaction: true
+    enableAutoCompaction: false
 
   gc:
     interval: 3600 # gc interval in seconds

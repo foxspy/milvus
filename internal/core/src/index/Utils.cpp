@@ -37,6 +37,7 @@ std::vector<IndexType>
 NM_List() {
     static std::vector<IndexType> ret{
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+        knowhere::IndexEnum::INDEX_HNSW
     };
     return ret;
 }

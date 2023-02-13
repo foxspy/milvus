@@ -48,24 +48,20 @@ FloatIndexSearch(const segcore::SegmentGrowingImpl& segment,
         auto enter_time_ = std::chrono::steady_clock::now();
         auto max_indexed_id = indexing_record.get_finished_ack();
         const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_id);
-        auto search_params = field_indexing.get_search_params(info.topk_);
         SearchInfo search_conf(info);
-        search_conf.search_params_ = search_params;
         AssertInfo(vec_ptr->get_size_per_chunk() == field_indexing.get_size_per_chunk(),
                    "[FloatSearch]Chunk size of vector not equal to chunk size of field index");
 
         auto size_per_chunk = field_indexing.get_size_per_chunk();
         for (int chunk_id = current_chunk_id; chunk_id < max_indexed_id; ++chunk_id) {
-            LOG_SEGCORE_DEBUG_<<"search on chunk index ["<<segment.get_segment_id()<<" , "<<chunk_id<<"]";
             if ((chunk_id + 1) * size_per_chunk > ins_barrier) {
                 break;
             }
-
             auto indexing = field_indexing.get_chunk_indexing(chunk_id);
             auto sub_view = bitset.subview(chunk_id * size_per_chunk, size_per_chunk);
             auto vec_index = (index::VectorIndex*)(indexing);
             auto sub_qr = SearchOnIndex(search_dataset, *vec_index, search_conf, sub_view);
-
+            LOG_SEGCORE_DEBUG_<<"search on chunk with index "<< vec_index->GetIndexType() <<" ["<<segment.get_segment_id()<<" , "<<chunk_id<<"], params : {"<<search_conf.search_params_<<"}";
             // convert chunk uid to segment uid
             for (auto& x : sub_qr.mutable_seg_offsets()) {
                 if (x != -1) {

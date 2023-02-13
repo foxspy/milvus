@@ -24,6 +24,7 @@
 #include "common/Schema.h"
 #include "segcore/SegcoreConfig.h"
 #include "index/VectorIndex.h"
+#include "common/Types.h"
 
 namespace milvus::segcore {
 

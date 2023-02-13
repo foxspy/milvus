@@ -18,11 +18,25 @@
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/segment_c.h"
 #include "index/IndexInfo.h"
 #include "google/protobuf/text_format.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
+
+std::string get_index_type(std::string collection_name) {
+    const std::string small_index_str = "small_index_";
+    if (collection_name.find(small_index_str)) {
+        auto index_offset = collection_name.find(small_index_str);
+        auto sub_name = collection_name.substr(index_offset);
+        auto index_detail = sub_name.substr(std::strlen(small_index_str.c_str()));
+        auto index_type = index_detail.substr(0, index_detail.find('_'));
+        return index_type;
+    }
+    return "";
+}
+
 CSegmentInterface
 NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
     auto col = (milvus::segcore::Collection*)collection;
@@ -30,14 +44,17 @@ NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
     std::unique_ptr<milvus::segcore::SegmentInterface> segment;
     switch (seg_type) {
         case Growing: {
-            auto seg = milvus::segcore::CreateGrowingSegment(col->get_schema(), segment_id);
-            if (col->get_collection_name().find("small_index") == std::string::npos) {
-                LOG_SEGCORE_DEBUG_ << "disable small index for collection " << col->get_collection_name();
+            std::string index_type = get_index_type(col->get_collection_name());
+            if (index_type.empty()) {
+                auto seg = milvus::segcore::CreateGrowingSegment(col->get_schema(), segment_id);
                 seg->disable_small_index();
+                LOG_SEGCORE_DEBUG_ << "disable small index for collection " << col->get_collection_name();
+                segment = std::move(seg);
             } else {
-                LOG_SEGCORE_DEBUG_ << "enable small index for collection " << col->get_collection_name();
+                auto seg = milvus::segcore::CreateGrowingSegment(col->get_schema(), segment_id, milvus::segcore::SegcoreConfig::gen_index_config(index_type));
+                LOG_SEGCORE_DEBUG_ << "enable small index for collection " << col->get_collection_name() << ", index type : " << index_type ;
+                segment = std::move(seg);
             }
-            segment = std::move(seg);
             break;
         }
         case Sealed:
