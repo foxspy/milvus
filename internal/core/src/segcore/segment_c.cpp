@@ -27,7 +27,7 @@
 
 std::string get_index_type(std::string collection_name) {
     const std::string small_index_str = "small_index_";
-    if (collection_name.find(small_index_str)) {
+    if (collection_name.find(small_index_str) != std::string::npos) {
         auto index_offset = collection_name.find(small_index_str);
         auto sub_name = collection_name.substr(index_offset);
         auto index_detail = sub_name.substr(std::strlen(small_index_str.c_str()));
