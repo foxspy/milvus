@@ -180,6 +180,10 @@ type IVFPQConfAdapter struct {
 	IVFConfAdapter
 }
 
+type IVFPQFastScanConfAdapter struct {
+	IVFConfAdapter
+}
+
 // CheckTrain checks if ivf-pq index can be built with the specific index parameters.
 func (adapter *IVFPQConfAdapter) CheckTrain(params map[string]string) bool {
 	if !adapter.IVFConfAdapter.CheckTrain(params) {
@@ -250,6 +254,10 @@ func (adapter *IVFPQConfAdapter) checkCPUPQParams(dimension, m int) bool {
 
 func newIVFPQConfAdapter() *IVFPQConfAdapter {
 	return &IVFPQConfAdapter{}
+}
+
+func newIVFPQFastScanConfAdapter() *IVFPQFastScanConfAdapter {
+	return &IVFPQFastScanConfAdapter{}
 }
 
 // IVFSQConfAdapter checks if a IVF_SQ index can be built.

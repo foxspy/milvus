@@ -48,6 +48,7 @@ func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
 	mgr.adapters[IndexFaissIDMap] = newBaseConfAdapter()
 	mgr.adapters[IndexFaissIvfFlat] = newIVFConfAdapter()
 	mgr.adapters[IndexFaissIvfPQ] = newIVFPQConfAdapter()
+	mgr.adapters[IndexFaissIvfFastScan] = newIVFPQFastScanConfAdapter()
 	mgr.adapters[IndexFaissIvfSQ8] = newIVFSQConfAdapter()
 	mgr.adapters[IndexFaissIvfSQ8H] = newIVFSQConfAdapter()
 	mgr.adapters[IndexFaissBinIDMap] = newBinIDMAPConfAdapter()
