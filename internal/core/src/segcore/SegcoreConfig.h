@@ -52,8 +52,8 @@ class SegcoreConfig {
         } else if (index_type == "ivfflat") {
             config.set_index_type(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
             LOG_SEGCORE_DEBUG_ << "set config type : "<< knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-        } else if (index_type == "scann") {
-            config.set_index_type("SCANN");
+        } else if (index_type == "ivfpqfastscan") {
+            config.set_index_type(knowhere::IndexEnum::INDEX_FAISS_IVFPQFASTSCAN);
         }
         return config;
     }

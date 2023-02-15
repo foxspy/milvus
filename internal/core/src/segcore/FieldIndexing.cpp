@@ -57,8 +57,11 @@ VectorFieldIndexing::get_build_params() const {
         base_params[knowhere::indexparam::EFCONSTRUCTION] = "200";
         base_params[knowhere::indexparam::HNSW_M] = "16";
     } else if (vector_index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
-        base_params["nlist"] = std::to_string(128);
-    } else if (vector_index_type_ == "SCANN") {
+        base_params[knowhere::indexparam::NLIST] = std::to_string(128);
+    } else if (vector_index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFPQFASTSCAN) {
+        base_params[knowhere::indexparam::NLIST] = std::to_string(128);
+        base_params[knowhere::indexparam::NBITS] = std::to_string(4);
+        base_params[knowhere::indexparam::REORDER_K] = std::to_string(100);
     }
     return base_params;
 }
