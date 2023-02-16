@@ -60,9 +60,9 @@ VectorFieldIndexing::get_build_params() const {
         base_params[knowhere::indexparam::NLIST] = std::to_string(128);
     } else if (vector_index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFPQFASTSCAN) {
         base_params[knowhere::indexparam::NLIST] = std::to_string(128);
-        base_params[knowhere::indexparam::M] = std::to_string(2);
+        base_params[knowhere::indexparam::M] = std::to_string(64);
         base_params[knowhere::indexparam::NBITS] = std::to_string(4);
-        base_params[knowhere::indexparam::REORDER_K] = std::to_string(100);
+        base_params[knowhere::indexparam::REORDER_K] = std::to_string(500);
     }
     return base_params;
 }
