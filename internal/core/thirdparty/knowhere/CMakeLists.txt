@@ -11,8 +11,8 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( KNOWHERE_VERSION v2.2.3 )
-set( KNOWHERE_SOURCE_MD5 "3675603047eb8619aa7771e5ace9c4a2")
+set( KNOWHERE_VERSION v2.2.4 )
+set( KNOWHERE_SOURCE_MD5 "e9076aa81a27c0422ca057b4945ad00b")
 
 if ( DEFINED ENV{MILVUS_KNOWHERE_URL} )
     set( KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}" )
