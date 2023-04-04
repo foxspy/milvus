@@ -15,27 +15,18 @@
 #include <string>
 
 #include "common/Types.h"
+#include "index/Utils.h"
 #include "exceptions/EasyAssert.h"
 #include "utils/Json.h"
 
 namespace milvus::segcore {
 
-struct SmallIndexConf {
-    std::string index_type;
-    nlohmann::json build_params;
-    nlohmann::json search_params;
-};
-
 class SegcoreConfig {
  private:
     SegcoreConfig() {
         // hard code configurations for small index
-        SmallIndexConf sub_conf;
-        sub_conf.build_params["nlist"] = std::to_string(nlist_);
-        sub_conf.search_params["nprobe"] = nprobe_;
-        sub_conf.index_type = "IVF";
-        table_[knowhere::metric::L2] = sub_conf;
-        table_[knowhere::metric::IP] = sub_conf;
+       index_type_ = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+       metric_type_ = knowhere::metric::L2;
     }
 
  public:
@@ -48,12 +39,6 @@ class SegcoreConfig {
 
     void
     parse_from(const std::string& string_path);
-
-    const SmallIndexConf&
-    at(const MetricType& metric_type) const {
-        Assert(table_.count(metric_type));
-        return table_.at(metric_type);
-    }
 
     int64_t
     get_chunk_rows() const {
@@ -75,16 +60,32 @@ class SegcoreConfig {
         nprobe_ = nprobe;
     }
 
-    void
-    set_small_index_config(const MetricType& metric_type, const SmallIndexConf& small_index_conf) {
-        table_[metric_type] = small_index_conf;
+    int64_t
+    get_train_threshold() const {
+        if (index::is_in_no_train_list(index_type_)) {
+            return 0;
+        } else {
+            return build_threshold ;
+        }
+    }
+
+    knowhere::IndexType
+    get_index_type() const {
+        return index_type_;
+    }
+
+    knowhere::MetricType
+    get_metric_type() const {
+        return metric_type_;
     }
 
  private:
+    knowhere::IndexType index_type_;
+    knowhere::MetricType  metric_type_;
+    int64_t build_threshold = 100000;
     int64_t chunk_rows_ = 32 * 1024;
     int64_t nlist_ = 100;
     int64_t nprobe_ = 4;
-    std::map<knowhere::MetricType, SmallIndexConf> table_;
 };
 
 }  // namespace milvus::segcore

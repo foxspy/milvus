@@ -23,6 +23,8 @@
 #include "storage/RemoteChunkManagerFactory.h"
 #include "storage/Util.h"
 
+#include "utils/TimeProfiler.h"
+
 namespace milvus::segcore {
 
 int64_t
@@ -58,6 +60,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            const int64_t* row_ids,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
+    std::string index_type = segcore_config_.get_index_type().empty() ? "BF" : segcore_config_.get_index_type();
+    TimeProfiler profiler("SegmentGrowingImpl.Insert[" + index_type + "]" + rangeStr(reserved_offset, size));
     AssertInfo(insert_data->num_rows() == size, "Entities_raw count not equal to insert size");
     //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
     //               "num fields of insert data not equal to num of schema fields");
@@ -92,12 +96,15 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         insert_record_.insert_pk(pks[i], reserved_offset + i);
     }
 
-    // step 5: update small indexes
-    insert_record_.ack_responder_.AddSegment(reserved_offset, reserved_offset + size);
-    if (enable_small_index_) {
-        int64_t chunk_rows = segcore_config_.get_chunk_rows();
-        indexing_record_.UpdateResourceAck(insert_record_.ack_responder_.GetAck() / chunk_rows, insert_record_);
-    }
+     // step 5: update small indexes
+     insert_record_.ack_responder_.AddSegment(reserved_offset,
+                                                 reserved_offset + size);
+     if (enable_segment_index_) {
+        if (reserved_offset + size >= segcore_config_.get_train_threshold()) {
+           indexing_record_.AppendingIndex(reserved_offset, size, insert_record_);
+        }
+     }
+     profiler.reportRate(size);
 }
 
 void
@@ -160,6 +167,7 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         int64_t chunk_rows = segcore_config_.get_chunk_rows();
         indexing_record_.UpdateResourceAck(insert_record_.ack_responder_.GetAck() / chunk_rows, insert_record_);
     }
+    profiler.reportRate(size);
 }
 
 Status

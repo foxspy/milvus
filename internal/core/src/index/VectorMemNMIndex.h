@@ -43,6 +43,9 @@ class VectorMemNMIndex : public VectorMemIndex {
     BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) override;
 
     void
+    AppendDataset(const DatasetPtr& dataset, const Config& config) override;
+
+    void
     Load(const BinarySet& binary_set, const Config& config = {}) override;
 
     std::unique_ptr<SearchResult>

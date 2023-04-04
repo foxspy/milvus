@@ -135,6 +135,19 @@ VectorMemIndex::Build(const Config& config) {
     BuildWithDataset(dataset, config);
 }
 
+void
+VectorMemIndex::AppendDataset(const DatasetPtr& dataset, const Config& config) {
+    knowhere::Json index_config;
+    index_config.update(config);
+
+    knowhere::TimeRecorder rc("AppendDataset", 1);
+    auto stat = index_.Add(*dataset, index_config);
+    if (stat != knowhere::Status::success)
+        PanicCodeInfo(ErrorCodeEnum::BuildIndexError,
+                      "failed to append index, " + MatchKnowhereError(stat));
+    rc.ElapseFromBegin("Done");
+}
+
 std::unique_ptr<SearchResult>
 VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) {
     //    AssertInfo(GetMetricType() == search_info.metric_type_,

@@ -31,8 +31,8 @@ NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
     std::unique_ptr<milvus::segcore::SegmentInterface> segment;
     switch (seg_type) {
         case Growing: {
-            auto seg = milvus::segcore::CreateGrowingSegment(col->get_schema(), segment_id);
-            seg->disable_small_index();
+            auto seg = milvus::segcore::CreateGrowingSegment(col->get_schema(),
+                                                             segment_id);
             segment = std::move(seg);
             break;
         }

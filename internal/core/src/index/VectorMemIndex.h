@@ -49,6 +49,9 @@ class VectorMemIndex : public VectorIndex {
     void
     Build(const Config& config = {}) override;
 
+    void
+    AppendDataset(const DatasetPtr& dataset, const Config& config) override;
+
     int64_t
     Count() override {
         return index_->Count();

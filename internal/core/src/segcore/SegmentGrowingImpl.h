@@ -123,12 +123,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
  public:
-    // only for debug
-    void
-    disable_small_index() override {
-        enable_small_index_ = false;
-    }
-
     int64_t
     get_row_count() const override {
         return insert_record_.ack_responder_.GetAck();
@@ -236,7 +230,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     int64_t id_;
 
  private:
-    bool enable_small_index_ = true;
+    bool enable_segment_index_ = true;
 };
 
 inline SegmentGrowingPtr

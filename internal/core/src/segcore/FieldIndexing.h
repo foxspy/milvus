@@ -39,14 +39,16 @@ class FieldIndexing {
     operator=(const FieldIndexing&) = delete;
     virtual ~FieldIndexing() = default;
 
-    // Do this in parallel
     virtual void
-    BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) = 0;
+    AppendSegmentIndex(int64_t reserved_offset, int64_t size, const VectorBase* vec_base) = 0;
 
     const FieldMeta&
     get_field_meta() {
         return field_meta_;
     }
+
+    virtual idx_t
+    get_index_cursor() = 0;
 
     int64_t
     get_size_per_chunk() const {
@@ -55,6 +57,9 @@ class FieldIndexing {
 
     virtual index::IndexBase*
     get_chunk_indexing(int64_t chunk_id) const = 0;
+
+    virtual index::IndexBase*
+    get_segment_indexing() const = 0;
 
  protected:
     // additional info
@@ -68,13 +73,24 @@ class ScalarFieldIndexing : public FieldIndexing {
     using FieldIndexing::FieldIndexing;
 
     void
-    BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) override;
+    AppendSegmentIndex(int64_t reserved_offset, int64_t size, const VectorBase* vec_base) override {
+        PanicInfo("scalar index don't support append segment index");
+    }
+    idx_t
+    get_index_cursor() override {
+        return 0;
+    }
 
     // concurrent
     index::ScalarIndex<T>*
     get_chunk_indexing(int64_t chunk_id) const override {
         Assert(!field_meta_.is_vector());
         return data_.at(chunk_id).get();
+    }
+
+    index::IndexBase*
+    get_segment_indexing() const override {
+        return nullptr;
     }
 
  private:
@@ -86,7 +102,7 @@ class VectorFieldIndexing : public FieldIndexing {
     using FieldIndexing::FieldIndexing;
 
     void
-    BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) override;
+    AppendSegmentIndex(int64_t reserved_offset, int64_t size, const VectorBase* vec_base) override;
 
     // concurrent
     index::IndexBase*
@@ -94,14 +110,29 @@ class VectorFieldIndexing : public FieldIndexing {
         Assert(field_meta_.is_vector());
         return data_.at(chunk_id).get();
     }
+    index::IndexBase*
+    get_segment_indexing() const override {
+        return index_.get();
+    }
 
-    knowhere::Config
-    get_build_params() const;
+    idx_t
+    get_index_cursor() override;
+
+    knowhere::Json
+    get_build_params(const knowhere::IndexType& index_type) const;
 
     knowhere::Config
     get_search_params(int top_k) const;
 
+    knowhere::Json
+    get_search_params(const knowhere::IndexType& index_type) const;
+
+    knowhere::Json
+    get_search_params(const knowhere::IndexType& indexType, int top_K) const;
+
  private:
+    std::atomic<idx_t> index_cur_ = 0;
+    std::unique_ptr<index::VectorIndex> index_;
     tbb::concurrent_vector<std::unique_ptr<index::VectorIndex>> data_;
 };
 
@@ -137,29 +168,15 @@ class IndexingRecord {
         assert(offset_id == schema_.size());
     }
 
-    // concurrent, reentrant
     template <bool is_sealed>
     void
-    UpdateResourceAck(int64_t chunk_ack, const InsertRecord<is_sealed>& record) {
-        if (resource_ack_ >= chunk_ack) {
-            return;
-        }
-
-        std::unique_lock lck(mutex_);
-        int64_t old_ack = resource_ack_;
-        if (old_ack >= chunk_ack) {
-            return;
-        }
-        resource_ack_ = chunk_ack;
-        lck.unlock();
-
-        //    std::thread([this, old_ack, chunk_ack, &record] {
+    AppendingIndex(int64_t reserved_offset, int64_t size, const InsertRecord<is_sealed>& record) {
         for (auto& [field_offset, entry] : field_indexings_) {
-            auto vec_base = record.get_field_data_base(field_offset);
-            entry->BuildIndexRange(old_ack, chunk_ack, vec_base);
+            if (entry->get_field_meta().is_vector()) {
+                auto vec_base = record.get_field_data_base(field_offset);
+                entry->AppendSegmentIndex(reserved_offset, size, vec_base);
+            }
         }
-        finished_ack_.AddSegment(old_ack, chunk_ack);
-        //    }).detach();
     }
 
     // concurrent
