@@ -391,6 +391,7 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
                                  Timestamp timestamp,
                                  const BitsetView& bitset,
                                  SearchResult& output) const {
+    LOG_KNOWHERE_INFO_<<"SegmentSealedImpl vector_search";
     AssertInfo(is_system_field_ready(), "System field is not ready");
     auto field_id = search_info.field_id_;
     auto& field_meta = schema_->operator[](field_id);

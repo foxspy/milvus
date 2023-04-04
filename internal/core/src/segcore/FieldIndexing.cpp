@@ -17,93 +17,102 @@
 #include "common/SystemProperty.h"
 #include "segcore/FieldIndexing.h"
 #include "index/VectorMemNMIndex.h"
+#include "utils/TimeProfiler.h"
 
 namespace milvus::segcore {
 
+
 void
-VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
-                                     int64_t ack_end,
-                                     const VectorBase* vec_base) {
+VectorFieldIndexing::AppendSegmentIndex(int64_t reserved_offset, int64_t size,
+                                        const VectorBase* vec_base) {
     AssertInfo(field_meta_.get_data_type() == DataType::VECTOR_FLOAT,
                "Data type of vector field is not VECTOR_FLOAT");
+
     auto dim = field_meta_.get_dim();
-
+    auto conf = get_build_params(segcore_config_.get_index_type());
     auto source = dynamic_cast<const ConcurrentVector<FloatVector>*>(vec_base);
-    AssertInfo(source, "vec_base can't cast to ConcurrentVector type");
-    auto num_chunk = source->num_chunk();
-    AssertInfo(ack_end <= num_chunk, "ack_end is bigger than num_chunk");
-    auto conf = get_build_params();
-    data_.grow_to_at_least(ack_end);
-    for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
-        const auto& chunk = source->get_chunk(chunk_id);
-        auto indexing = std::make_unique<index::VectorMemNMIndex>(
-            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, knowhere::metric::L2);
-        auto dataset = knowhere::GenDataSet(
-            source->get_size_per_chunk(), dim, chunk.data());
-        indexing->BuildWithDataset(dataset, conf);
-        data_[chunk_id] = std::move(indexing);
-    }
-}
 
-knowhere::Json
-VectorFieldIndexing::get_build_params() const {
-    // TODO
-    auto type_opt = field_meta_.get_metric_type();
-    AssertInfo(type_opt.has_value(),
-               "Metric type of field meta doesn't have value");
-    auto& metric_type = type_opt.value();
-    auto& config = segcore_config_.at(metric_type);
-    auto base_params = config.build_params;
+    auto per_chunk = source->get_size_per_chunk();
+    //append vector [vector_id_beg, vector_id_end] into index
+    idx_t vector_id_beg = index_cur_.load();
+    idx_t vector_id_end = reserved_offset + size - 1;
+    auto chunk_id_beg =  vector_id_beg / per_chunk;
+    auto chunk_id_end =  vector_id_end / per_chunk;
 
-    AssertInfo(base_params.count("nlist"), "Can't get nlist from index params");
-    base_params[knowhere::meta::DIM] = std::to_string(field_meta_.get_dim());
-    base_params[knowhere::meta::METRIC_TYPE] = metric_type;
+    int64_t vec_num = vector_id_end - vector_id_beg + 1;
 
-    return base_params;
-}
-
-knowhere::Json
-VectorFieldIndexing::get_search_params(int top_K) const {
-    // TODO
-    auto type_opt = field_meta_.get_metric_type();
-    AssertInfo(type_opt.has_value(),
-               "Metric type of field meta doesn't have value");
-    auto& metric_type = type_opt.value();
-    auto& config = segcore_config_.at(metric_type);
-
-    auto base_params = config.search_params;
-    AssertInfo(base_params.count("nprobe"),
-               "Can't get nprobe from base params");
-    base_params[knowhere::meta::TOPK] = top_K;
-    base_params[knowhere::meta::METRIC_TYPE] = metric_type;
-
-    return base_params;
-}
-
-template <typename T>
-void
-ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg,
-                                        int64_t ack_end,
-                                        const VectorBase* vec_base) {
-    auto source = dynamic_cast<const ConcurrentVector<T>*>(vec_base);
-    AssertInfo(source, "vec_base can't cast to ConcurrentVector type");
-    auto num_chunk = source->num_chunk();
-    AssertInfo(ack_end <= num_chunk, "Ack_end is bigger than num_chunk");
-    data_.grow_to_at_least(ack_end);
-    for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
-        const auto& chunk = source->get_chunk(chunk_id);
-        // build index for chunk
-        // TODO
-        if constexpr (std::is_same_v<T, std::string>) {
-            auto indexing = index::CreateStringIndexSort();
-            indexing->Build(vec_base->get_size_per_chunk(), chunk.data());
-            data_[chunk_id] = std::move(indexing);
+    //build index when not exist
+    if (!index_.get()) {
+        std::string index_type = segcore_config_.get_index_type();
+        TimeProfiler profiler("AppendSegmentIndex-Build[" + index_type +  "]:" + rangeStr(vector_id_beg, vec_num));
+        const void *data_addr;
+        std::unique_ptr<float[]> vec_data;
+        //all train data in one chunk
+        if (chunk_id_beg == chunk_id_end) {
+            data_addr = vec_base->get_chunk_data(chunk_id_beg);
         } else {
-            auto indexing = index::CreateScalarIndexSort<T>();
-            indexing->Build(vec_base->get_size_per_chunk(), chunk.data());
-            data_[chunk_id] = std::move(indexing);
+            //merge data from multiple chunks together
+            vec_data = std::make_unique<float[]>(vec_num * dim);
+            int64_t offset = 0;
+            for (int chunk_id = chunk_id_beg; chunk_id <= chunk_id_end; chunk_id++) {
+                int chunk_offset = 0;
+                int chunk_copysz = chunk_id == chunk_id_end ? (vector_id_beg + vec_num) - chunk_id * per_chunk : per_chunk;
+                std::memcpy(vec_data.get() + offset * dim, (const float *)vec_base->get_chunk_data(chunk_id) + chunk_offset * dim, chunk_copysz * dim * sizeof(float));
+                offset += chunk_copysz;
+            }
+            data_addr = vec_data.get();
         }
+        auto dataset = knowhere::GenDataSet(vec_num, dim, data_addr);
+        auto indexing = std::make_unique<index::VectorMemIndex>(
+            segcore_config_.get_index_type(),
+            segcore_config_.get_metric_type());
+        indexing->BuildWithDataset(dataset, conf);
+        index_cur_.fetch_add(vec_num);
+        index_ = std::move(indexing);
+        profiler.reportRate(vec_num);
+    } else {
+        //append data when index exist
+        std::string index_type = segcore_config_.get_index_type();
+        TimeProfiler profiler("AppendSegmentIndex-Append["+ index_type + "]:" + rangeStr(vector_id_beg, vec_num));
+
+        for (int chunk_id = chunk_id_beg; chunk_id <= chunk_id_end; chunk_id++) {
+            int chunk_offset = chunk_id == chunk_id_beg ? index_cur_ - chunk_id * per_chunk : 0;
+            int chunk_sz = chunk_id == chunk_id_end ? vector_id_end % per_chunk - chunk_offset + 1:
+                           chunk_id == chunk_id_beg ? per_chunk - chunk_offset: per_chunk;
+            auto dataset = knowhere::GenDataSet(chunk_sz, dim, (const float *)source->get_chunk_data(chunk_id) + chunk_offset * dim);
+            index_->AppendDataset(dataset, conf);
+            index_cur_.fetch_add(chunk_sz);
+        }
+        profiler.reportRate(vec_num);
     }
+}
+
+
+knowhere::Json
+VectorFieldIndexing::get_build_params(const knowhere::IndexType& indexType) const {
+    nlohmann::json base_params;
+    base_params[knowhere::meta::METRIC_TYPE] = knowhere::metric::L2;
+    base_params[knowhere::meta::DIM] = std::to_string(field_meta_.get_dim());
+    if (indexType == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
+        base_params[knowhere::indexparam::NLIST] = std::to_string(128);
+    }
+    return base_params;
+}
+
+knowhere::Json
+VectorFieldIndexing::get_search_params(const knowhere::IndexType& indexType, int top_K) const {
+    // TODO : how to process other metric
+    nlohmann::json base_params;
+    base_params[knowhere::meta::TOPK] = top_K;
+    base_params[knowhere::meta::METRIC_TYPE] = knowhere::metric::L2;
+    if (indexType == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
+        base_params[knowhere::indexparam::NPROBE] = std::to_string(10);
+    }
+    return base_params;
+}
+idx_t
+VectorFieldIndexing::get_index_cursor() {
+    return index_cur_.load();
 }
 
 std::unique_ptr<FieldIndexing>

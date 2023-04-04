@@ -21,6 +21,10 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
 
+#include "utils/TimeProfiler.h"
+#include "log/Log.h"
+#include "knowhere/log.h"
+
 namespace milvus::segcore {
 
 int64_t
@@ -60,8 +64,9 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            const int64_t* row_ids,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
-    AssertInfo(insert_data->num_rows() == size,
-               "Entities_raw count not equal to insert size");
+    std::string index_type = segcore_config_.get_index_type().empty() ? "BF" : segcore_config_.get_index_type();
+    TimeProfiler profiler("SegmentGrowingImpl.Insert[" + index_type + "]" + rangeStr(reserved_offset, size));
+    AssertInfo(insert_data->num_rows() == size, "Entities_raw count not equal to insert size");
     //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
     //               "num fields of insert data not equal to num of schema fields");
     // step 1: check insert data if valid
@@ -102,13 +107,13 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
-                                             reserved_offset + size);
-    if (enable_small_index_) {
-        int64_t chunk_rows = segcore_config_.get_chunk_rows();
-        indexing_record_.UpdateResourceAck(
-            insert_record_.ack_responder_.GetAck() / chunk_rows,
-            insert_record_);
+                                                 reserved_offset + size);
+    if (enable_segment_index_) {
+        if (reserved_offset + size >= segcore_config_.get_train_threshold()) {
+            indexing_record_.AppendingIndex(reserved_offset, size, insert_record_);
+        }
     }
+    profiler.reportRate(size);
 }
 
 Status
@@ -200,6 +205,8 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
                                   SearchResult& output) const {
+
+    LOG_KNOWHERE_INFO_<<"SegmentGrowingImpl vector_search";
     auto& sealed_indexing = this->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(search_info.field_id_)) {
         query::SearchOnSealedIndex(this->get_schema(),

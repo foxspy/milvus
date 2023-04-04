@@ -30,6 +30,8 @@ std::once_flag init_knowhere_once_;
 void
 KnowhereInitImpl(const char* conf_file) {
     auto init = [&]() {
+        LOG_SEGCORE_INFO_<<"KnowhereInitImpl segcore side done";
+        LOG_KNOWHERE_INFO_<<"KnowhereInitImpl knowhere side done";
         knowhere::KnowhereConfig::SetBlasThreshold(16384);
         knowhere::KnowhereConfig::SetEarlyStopThreshold(0);
         knowhere::KnowhereConfig::SetLogHandler();
