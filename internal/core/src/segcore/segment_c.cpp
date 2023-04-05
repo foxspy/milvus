@@ -22,6 +22,49 @@
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
+#include "segcore/SegcoreConfig.h"
+
+std::vector<std::string> string_split(std::string str, std::string delimiter) {
+    std::vector<std::string> result;
+    size_t pos = 0;
+    std::string token;
+
+    while ((pos = str.find(delimiter)) != std::string::npos) {
+        token = str.substr(0, pos);
+        result.push_back(token);
+        str.erase(0, pos + delimiter.length());
+    }
+    result.push_back(str);
+    return result;
+}
+
+void modify_config_by_name(std::string_view collection_name, milvus::segcore::SegcoreConfig& config) {
+    std::string name(collection_name);
+    std::vector<std::string> split_name = string_split(name, "_");
+    //growing_dataset_index_chunksize_buildthres
+    static std::map<std::string, const char *> index_name_map = {std::make_pair("ivfflat", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT),
+                                                                std::make_pair("ivfflatcc", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC),
+                                                                std::make_pair("hnsw", knowhere::IndexEnum::INDEX_HNSW)
+    };
+
+    static std::map<std::string, std::string> metric_name_map = {std::make_pair("sift", "L2"),
+                                                                 std::make_pair("gist", "L2"),
+                                                                 std::make_pair("glove", "IP"),
+                                                                 std::make_pair("deep", "IP")};
+
+    config.chunk_rows_ = std::atoi(split_name[3].c_str());
+    auto dataset = split_name[1];
+    config.metric_type_ = metric_name_map[dataset];
+    auto index = split_name[2];
+    if (std::strcmp(split_name[0].c_str(), "growing") != 0 || index_name_map.find(index) == index_name_map.end()) {
+       config.enable_segment_index_ = false;
+    } else {
+       config.index_type_ = index_name_map[index];
+       config.enable_segment_index_ = true;
+    }
+    config.build_threshold = std::atoi(split_name[4].c_str());
+}
+
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
@@ -31,8 +74,15 @@ NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
     std::unique_ptr<milvus::segcore::SegmentInterface> segment;
     switch (seg_type) {
         case Growing: {
+            milvus::segcore::SegcoreConfig config;
+            modify_config_by_name(col->get_collection_name(), config);
             auto seg = milvus::segcore::CreateGrowingSegment(col->get_schema(),
-                                                             segment_id);
+                                                             segment_id, config);
+            LOG_SEGCORE_INFO_<<"segment_index: " << seg->getConfig().enable_segment_index_<<" , "
+                             <<"metric_type: " << seg->getConfig().metric_type_<<" , "
+                             <<"index_type: " << seg->getConfig().index_type_<<" , "
+                             <<"chunk_rows: " << seg->getConfig().chunk_rows_<<" , "
+                             <<"build_threshold: " << seg->getConfig().build_threshold;
             segment = std::move(seg);
             break;
         }

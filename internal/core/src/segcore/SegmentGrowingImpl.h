@@ -72,6 +72,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return id_;
     }
 
+    SegcoreConfig&
+    getConfig() override {
+        return segcore_config_;
+    }
+
+
  public:
     const InsertRecord<>&
     get_insert_record() const {
@@ -244,9 +250,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     mutable DeletedRecord deleted_record_;
 
     int64_t id_;
-
- private:
-    bool enable_segment_index_ = true;
 };
 
 inline SegmentGrowingPtr

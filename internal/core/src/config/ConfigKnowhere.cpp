@@ -30,8 +30,6 @@ std::once_flag init_knowhere_once_;
 void
 KnowhereInitImpl(const char* conf_file) {
     auto init = [&]() {
-        LOG_SEGCORE_INFO_<<"KnowhereInitImpl segcore side done";
-        LOG_KNOWHERE_INFO_<<"KnowhereInitImpl knowhere side done";
         knowhere::KnowhereConfig::SetBlasThreshold(16384);
         knowhere::KnowhereConfig::SetEarlyStopThreshold(0);
         knowhere::KnowhereConfig::SetLogHandler();
@@ -47,10 +45,10 @@ KnowhereInitImpl(const char* conf_file) {
         if (conf_file != nullptr) {
             el::Configurations el_conf(conf_file);
             el::Loggers::reconfigureAllLoggers(el_conf);
-            LOG_SERVER_DEBUG_ << "Config easylogging with yaml file: "
-                              << conf_file;
+            //LOG_SERVER_DEBUG_ << "Config easylogging with yaml file: "
+            //                 << conf_file;
         }
-        LOG_SERVER_DEBUG_ << "Knowhere init successfully";
+        //LOG_SERVER_DEBUG_ << "Knowhere init successfully";
 #endif
     };
 

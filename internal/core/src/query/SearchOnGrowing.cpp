@@ -49,13 +49,10 @@ FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
         SearchInfo search_conf(info);
         AssertInfo(vec_ptr->get_size_per_chunk() == field_indexing.get_size_per_chunk(),
                    "[FloatSearch]Chunk size of vector not equal to chunk size of field index");
-
         auto indexing = field_indexing.get_segment_indexing();
         auto vec_index = (index::VectorIndex*)(indexing);
-        segcore::TimeProfiler profiler("SearchOnSegment{" + vec_index->GetIndexType() + "}");
         auto result = SearchOnIndex(search_dataset, *vec_index, search_conf, bitset);
         results.merge(result);
-        profiler.reportRate(vec_index->Count());
     }
 }
 
@@ -99,12 +96,16 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         enable_segment_index = segment.get_indexing_record().get_field_indexing(field.get_id()).get_segment_indexing() != nullptr;
     }
     if (enable_segment_index) {
+        auto index = (index::VectorIndex*) segment.get_indexing_record().get_field_indexing(field.get_id()).get_segment_indexing();
+        segcore::TimeProfiler profiler("SearchOnSegment{" + index->GetIndexType() + "}");
         FloatSegmentIndexSearch(segment, info, query_data, num_queries, active_count, bitset, final_qr);
         results.distances_ = std::move(final_qr.mutable_distances());
         results.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
         results.unity_topK_ = topk;
         results.total_nq_ = num_queries;
+        profiler.reportRate(search_dataset.num_queries);
     } else {
+        segcore::TimeProfiler profiler("SearchOnSegment{BF}");
         int32_t current_chunk_id = 0;
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_field_data_base(vecfield_id);
@@ -139,6 +140,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         results.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
         results.unity_topK_ = topk;
         results.total_nq_ = num_queries;
+        profiler.reportRate(search_dataset.num_queries);
     }
 }
 

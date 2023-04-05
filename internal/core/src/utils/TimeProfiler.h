@@ -29,14 +29,14 @@ class TimeProfiler {
     void
     report() {
        auto now =  std::chrono::steady_clock::now();
-       LOG_KNOWHERE_INFO_<<"Segment Profiling :"<< entry_name_ << " cost "<< std::chrono::duration_cast<std::chrono::microseconds>(now - enter_time_).count()/ 1000000.0 << "[s]";
+       LOG_SEGCORE_INFO_<<"Segment Profiling :"<< entry_name_ << " cost "<< std::chrono::duration_cast<std::chrono::microseconds>(now - enter_time_).count()/ 1000000.0 << "[s]";
     }
 
     void
     reportRate(int64_t size) {
        auto now =  std::chrono::steady_clock::now();
        double consume = std::chrono::duration_cast<std::chrono::microseconds>(now - enter_time_).count()/ 1000000.0;
-       LOG_KNOWHERE_INFO_<<"Segment Profiling :"<< entry_name_ << " cost "<< consume << "[s], rate: "<< size / consume << " per second";
+       LOG_SEGCORE_INFO_<<"Segment Profiling :"<< entry_name_ << " cost "<< consume << "[s], rate: "<< size / consume << " per second";
     }
  private:
     std::string entry_name_;

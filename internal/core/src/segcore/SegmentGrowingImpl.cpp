@@ -22,8 +22,6 @@
 #include "segcore/Utils.h"
 
 #include "utils/TimeProfiler.h"
-#include "log/Log.h"
-#include "knowhere/log.h"
 
 namespace milvus::segcore {
 
@@ -108,7 +106,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                                  reserved_offset + size);
-    if (enable_segment_index_) {
+    if (segcore_config_.enable_segment_index_) {
         if (reserved_offset + size >= segcore_config_.get_train_threshold()) {
             indexing_record_.AppendingIndex(reserved_offset, size, insert_record_);
         }

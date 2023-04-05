@@ -65,7 +65,7 @@ class FieldIndexing {
  protected:
     // additional info
     const FieldMeta& field_meta_;
-    const SegcoreConfig& segcore_config_;
+    SegcoreConfig segcore_config_;
 };
 
 template <typename T>
@@ -159,10 +159,6 @@ class IndexingRecord {
                 if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                     continue;
                 }
-                // flat should be skipped
-                if (!field_meta.get_metric_type().has_value()) {
-                    continue;
-                }
             }
 
             field_indexings_.try_emplace(
@@ -219,7 +215,7 @@ class IndexingRecord {
 
  private:
     const Schema& schema_;
-    const SegcoreConfig& segcore_config_;
+    SegcoreConfig segcore_config_;
 
  private:
     // control info

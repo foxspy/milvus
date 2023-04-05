@@ -22,13 +22,6 @@
 namespace milvus::segcore {
 
 class SegcoreConfig {
- private:
-    SegcoreConfig() {
-        // hard code configurations for small index
-       index_type_ = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
-       metric_type_ = knowhere::metric::L2;
-    }
-
  public:
     static SegcoreConfig&
     default_config() {
@@ -79,7 +72,8 @@ class SegcoreConfig {
         return metric_type_;
     }
 
- private:
+ //private:
+    bool enable_segment_index_ = false;
     knowhere::IndexType index_type_;
     knowhere::MetricType  metric_type_;
     int64_t build_threshold = 100000;
