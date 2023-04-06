@@ -93,7 +93,9 @@ VectorFieldIndexing::get_build_params(const knowhere::IndexType& indexType) cons
     nlohmann::json base_params;
     base_params[knowhere::meta::METRIC_TYPE] = knowhere::metric::L2;
     base_params[knowhere::meta::DIM] = std::to_string(field_meta_.get_dim());
-    if (indexType == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
+    if (indexType == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+        base_params[knowhere::indexparam::NLIST] = std::to_string(128);
+    } else if (indexType == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
         base_params[knowhere::indexparam::NLIST] = std::to_string(128);
         base_params["ssize"] = std::to_string(segcore_config_.segment_size_);
     }
@@ -106,7 +108,9 @@ VectorFieldIndexing::get_search_params(const knowhere::IndexType& indexType, int
     nlohmann::json base_params;
     base_params[knowhere::meta::TOPK] = top_K;
     base_params[knowhere::meta::METRIC_TYPE] = knowhere::metric::L2;
-    if (indexType == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
+    if (indexType == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+        base_params[knowhere::indexparam::NPROBE] = std::to_string(10);
+    } else if (indexType == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
         base_params[knowhere::indexparam::NPROBE] = std::to_string(10);
     }
     return base_params;
