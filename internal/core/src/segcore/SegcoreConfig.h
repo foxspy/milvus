@@ -78,6 +78,7 @@ class SegcoreConfig {
     knowhere::MetricType  metric_type_;
     int64_t build_threshold = 100000;
     int64_t chunk_rows_ = 32 * 1024;
+    int64_t segment_size_ = 1024;
     int64_t nlist_ = 100;
     int64_t nprobe_ = 4;
 };

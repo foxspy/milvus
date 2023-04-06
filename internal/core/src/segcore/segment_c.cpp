@@ -63,6 +63,7 @@ void modify_config_by_name(std::string_view collection_name, milvus::segcore::Se
        config.enable_segment_index_ = true;
     }
     config.build_threshold = std::atoi(split_name[4].c_str());
+    config.segment_size_ = std::atoi(split_name[5].c_str());
 }
 
 
@@ -82,7 +83,8 @@ NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
                              <<"metric_type: " << seg->getConfig().metric_type_<<" , "
                              <<"index_type: " << seg->getConfig().index_type_<<" , "
                              <<"chunk_rows: " << seg->getConfig().chunk_rows_<<" , "
-                             <<"build_threshold: " << seg->getConfig().build_threshold;
+                             <<"build_threshold: " << seg->getConfig().build_threshold<<" , "
+                             <<"segment_size: "<<seg->getConfig().segment_size_;
             segment = std::move(seg);
             break;
         }
