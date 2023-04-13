@@ -23,7 +23,7 @@ VecIndexConfig::getBuildThreshold() const noexcept  {
     assert(VecIndexConfig::index_build_ratio.count(index_type_));
     auto ratio = VecIndexConfig::index_build_ratio.at(index_type_);
     assert(ratio >= 0.0 && ratio < 1.0);
-    return max_index_row_count_ * ratio;
+    return std::max(int64_t(max_index_row_count_ * ratio), config_.get_nlist() * 39);
 }
 
 knowhere::IndexType
