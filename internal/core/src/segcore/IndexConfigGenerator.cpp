@@ -10,7 +10,7 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout, const FieldInde
     index_type_ = support_index_types[0];
     build_params_[knowhere::meta::METRIC_TYPE] = metric_type_;
     build_params_[knowhere::indexparam::NLIST] = std::to_string(config_.get_nlist());
-    build_params_[knowhere::indexparam::SSIZE] = std::to_string(std::max(config_.get_chunk_rows() / config_.get_nlist(), (long long)(48)));
+    build_params_[knowhere::indexparam::SSIZE] = std::to_string(std::max((int)(config_.get_chunk_rows() / config_.get_nlist()), 48));
     search_params_[knowhere::indexparam::NPROBE] = std::to_string(config_.get_nprobe());
     LOG_SEGCORE_INFO_ << "VecIndexConfig: "
                       <<"origin_index_type_:" << origin_index_type_
