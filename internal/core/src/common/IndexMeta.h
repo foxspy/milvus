@@ -56,7 +56,7 @@ class FieldIndexMeta {
         if (index_params_.find(param_key) != index_params_.end())  {
             return index_params_.at(param_key);
         }
-        std::nullopt_t;
+        return "";
     }
  private:
     FieldId fieldId_;
