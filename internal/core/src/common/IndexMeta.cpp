@@ -59,9 +59,8 @@ CollectionIndexMeta::has_field(FieldId fieldId) const {
 
 const FieldIndexMeta&
 CollectionIndexMeta::GetFieldIndexMeta(FieldId fieldId) const {
-    if (fieldMetas_.find(fieldId) != fieldMetas_.end()) {
-        return fieldMetas_.at(fieldId);
-    }
+    assert(fieldMetas_.find(fieldId) != fieldMetas_.end());
+    return fieldMetas_.at(fieldId);
 }
 
 void
