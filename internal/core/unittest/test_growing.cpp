@@ -24,7 +24,9 @@ TEST(Growing, DeleteCount) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk);
-    auto segment = CreateGrowingSegment(schema);
+    std::map<FieldId , FieldIndexMeta> filed_meta;
+    auto indexMetaPtr = std::make_shared<CollectionIndexMeta>(1024, std::move(filed_meta));
+    auto segment = CreateGrowingSegment(schema, indexMetaPtr);
 
     int64_t c = 10;
     auto offset = segment->PreDelete(c);
@@ -44,7 +46,9 @@ TEST(Growing, RealCount) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk);
-    auto segment = CreateGrowingSegment(schema);
+    std::map<FieldId , FieldIndexMeta> filed_meta;
+    auto indexMetaPtr = std::make_shared<CollectionIndexMeta>(1024, std::move(filed_meta));
+    auto segment = CreateGrowingSegment(schema, indexMetaPtr);
 
     int64_t c = 10;
     auto offset = segment->PreInsert(c);

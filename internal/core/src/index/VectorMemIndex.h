@@ -42,7 +42,7 @@ class VectorMemIndex : public VectorIndex {
                      const Config& config = {}) override;
 
     void
-    AppendDataset(const DatasetPtr& dataset, const Config& config) override;
+    AddWithDataset(const DatasetPtr& dataset, const Config& config) override;
 
     int64_t
     Count() override {

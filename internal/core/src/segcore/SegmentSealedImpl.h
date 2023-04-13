@@ -85,6 +85,12 @@ class SegmentSealedImpl : public SegmentSealed {
     const Schema&
     get_schema() const override;
 
+    void
+    set_collection_name(std::string name_);
+
+    std::string
+    get_collection_name() const override;
+
  public:
     int64_t
     num_chunk_index(FieldId field_id) const override;
@@ -237,6 +243,8 @@ class SegmentSealedImpl : public SegmentSealed {
 
     // deleted pks
     mutable DeletedRecord deleted_record_;
+
+    std::string collection_name_;
 
     SchemaPtr schema_;
     int64_t id_;

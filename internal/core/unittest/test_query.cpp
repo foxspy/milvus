@@ -176,7 +176,7 @@ TEST(Query, ExecWithPredicateLoader) {
     })";
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -260,7 +260,7 @@ TEST(Query, ExecWithPredicateSmallN) {
     })";
     int64_t N = 177;
     auto dataset = DataGen(schema, N);
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -320,7 +320,7 @@ TEST(Query, ExecWithPredicate) {
     })";
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -403,7 +403,7 @@ TEST(Query, ExecTerm) {
     })";
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -454,7 +454,7 @@ TEST(Query, ExecEmpty) {
         }
     })";
     int64_t N = ROW_COUNT;
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
@@ -504,7 +504,7 @@ TEST(Query, ExecWithoutPredicateFlat) {
     auto plan = CreatePlan(*schema, dsl);
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -556,7 +556,7 @@ TEST(Query, ExecWithoutPredicate) {
     auto plan = CreatePlan(*schema, dsl);
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -632,7 +632,7 @@ TEST(Query, InnerProduct) {
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto dataset = DataGen(schema, N);
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     auto plan = CreatePlan(*schema, dsl);
     segment->PreInsert(N);
     segment->Insert(0,
@@ -706,7 +706,7 @@ TEST(Query, FillSegment) {
 
     std::vector<std::unique_ptr<SegmentInternalInterface>> segments;
     segments.emplace_back([&] {
-        auto segment = CreateGrowingSegment(schema);
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
         segment->PreInsert(N);
         segment->Insert(0,
                         N,
@@ -854,7 +854,7 @@ TEST(Query, ExecWithPredicateBinary) {
     })";
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
-    auto segment = CreateGrowingSegment(schema);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,

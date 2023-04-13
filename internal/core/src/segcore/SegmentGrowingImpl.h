@@ -33,6 +33,7 @@
 #include "query/PlanNode.h"
 #include "query/deprecated/GeneralQuery.h"
 #include "utils/Status.h"
+#include "common/IndexMeta.h"
 
 namespace milvus::segcore {
 
@@ -72,12 +73,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return id_;
     }
 
-    SegcoreConfig&
-    getConfig() override {
-        return segcore_config_;
-    }
-
-
  public:
     const InsertRecord<>&
     get_insert_record() const {
@@ -102,6 +97,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
     const Schema&
     get_schema() const override {
         return *schema_;
+    }
+
+    std::string
+    get_collection_name() const override {
+        return index_meta_->collection_name_;
     }
 
     // return count of index that has index, i.e., [0, num_chunk_index) have built index
@@ -177,13 +177,22 @@ class SegmentGrowingImpl : public SegmentGrowing {
                          int64_t segment_id);
 
     explicit SegmentGrowingImpl(SchemaPtr schema,
+                                IndexMetaPtr indexMeta,
                                 const SegcoreConfig& segcore_config,
                                 int64_t segment_id)
         : segcore_config_(segcore_config),
           schema_(std::move(schema)),
+          index_meta_(indexMeta),
           insert_record_(*schema_, segcore_config.get_chunk_rows()),
-          indexing_record_(*schema_, segcore_config_),
+          indexing_record_(*schema_, index_meta_, segcore_config_),
           id_(segment_id) {
+        if (index_meta_->collection_name_.find("_bf_") != std::string::npos) {
+            segcore_config_.set_enable_growing_segment_index(false);
+        }
+        LOG_KNOWHERE_INFO_<<" SegcoreConfig : { enable_growing_segment_index_:"  <<  segcore_config_.get_enable_growing_segment_index()<<" , "
+                          <<" chunk_rows_: " << segcore_config_.get_chunk_rows() <<" , "
+                          <<" nlist: " << segcore_config_.get_nlist()<<" , "
+                          <<" nprobe " << segcore_config_.get_nprobe();
     }
 
     void
@@ -238,6 +247,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
  private:
     SegcoreConfig segcore_config_;
     SchemaPtr schema_;
+    IndexMetaPtr  index_meta_;
 
     // small indexes for every chunk
     IndexingRecord indexing_record_;
@@ -252,12 +262,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
     int64_t id_;
 };
 
+const static IndexMetaPtr empty_index_meta = std::make_shared<CollectionIndexMeta>(1024, std::map<FieldId, FieldIndexMeta>());
+
 inline SegmentGrowingPtr
 CreateGrowingSegment(
     SchemaPtr schema,
+    IndexMetaPtr indexMeta,
     int64_t segment_id = -1,
     const SegcoreConfig& conf = SegcoreConfig::default_config()) {
-    return std::make_unique<SegmentGrowingImpl>(schema, conf, segment_id);
+    return std::make_unique<SegmentGrowingImpl>(schema, indexMeta, conf, segment_id);
 }
 
 }  // namespace milvus::segcore

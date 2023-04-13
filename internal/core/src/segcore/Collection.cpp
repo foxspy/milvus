@@ -12,7 +12,9 @@
 #include <google/protobuf/text_format.h>
 
 #include "pb/schema.pb.h"
+#include "pb/meta.pb.h"
 #include "segcore/Collection.h"
+#include "log/Log.h"
 
 namespace milvus::segcore {
 
@@ -45,6 +47,24 @@ Collection::parse() {
 
     collection_name_ = collection_schema.name();
     schema_ = Schema::ParseFrom(collection_schema);
+    schema_->collection_name_ = collection_name_;
+}
+
+void
+Collection::parseIndexMeta(const std::string_view index_meta_proto_) {
+    Assert(!index_meta_proto_.empty());
+
+    milvus::proto::meta::CollectionIndexMeta protobuf_indexMeta;
+    auto suc = google::protobuf::TextFormat::ParseFromString(
+        std::string(index_meta_proto_), &protobuf_indexMeta);
+
+    if (!suc) {
+        std::cerr << "unmarshal index meta string failed" << std::endl;
+    }
+
+    index_meta_ = std::shared_ptr<CollectionIndexMeta>(new CollectionIndexMeta(protobuf_indexMeta));
+    index_meta_->PrintParams();
+    index_meta_->collection_name_ = collection_name_;
 }
 
 }  // namespace milvus::segcore

@@ -82,14 +82,14 @@ VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset,
 }
 
 void
-VectorMemIndex::AppendDataset(const DatasetPtr& dataset, const Config& config) {
+VectorMemIndex::AddWithDataset(const DatasetPtr& dataset, const Config& config) {
     knowhere::Json index_config;
     index_config.update(config);
 
-    knowhere::TimeRecorder rc("AppendDataset", 1);
+    knowhere::TimeRecorder rc("AddWithDataset", 1);
     auto stat = index_.Add(*dataset, index_config);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::BuildIndexError,
+        PanicCodeInfo(ErrorCodeEnum::AppendingIndexError,
                       "failed to append index, " + MatchKnowhereError(stat));
     rc.ElapseFromBegin("Done");
 }

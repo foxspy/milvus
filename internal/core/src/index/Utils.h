@@ -58,9 +58,6 @@ bool
 is_in_nm_list(const IndexType& index_type);
 
 bool
-is_in_no_train_list(const IndexType& index_type);
-
-bool
 is_in_disk_list(const IndexType& index_type);
 
 bool

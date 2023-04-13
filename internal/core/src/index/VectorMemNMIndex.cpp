@@ -53,7 +53,7 @@ VectorMemNMIndex::BuildWithDataset(const DatasetPtr& dataset,
 }
 
 void
-VectorMemNMIndex::AppendDataset(const DatasetPtr& /*dataset*/,
+VectorMemNMIndex::AddWithDataset(const DatasetPtr& /*dataset*/,
                                 const Config& /*config*/) {
 }
 

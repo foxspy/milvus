@@ -33,6 +33,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/metapb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -68,6 +69,8 @@ type ReplicaInterface interface {
 	getCollectionIDs() []UniqueID
 	// addCollection creates a new collection and add it to collectionReplica
 	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection
+	// attach index info to collection
+	setIndexInfo(collectionID UniqueID, meta *metapb.CollectionIndexMeta) error
 	// removeCollection removes the collection from collectionReplica
 	removeCollection(collectionID UniqueID) error
 	// getCollectionByID gets the collection which id is collectionID
@@ -213,6 +216,21 @@ func (replica *metaReplica) addCollection(collectionID UniqueID, schema *schemap
 	replica.collections[collectionID] = newC
 	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(len(replica.collections)))
 	return newC
+}
+
+// set index
+func (replica *metaReplica) setIndexInfo(collectionID UniqueID, meta *metapb.CollectionIndexMeta) error {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+
+	col, err := replica.getCollectionByIDPrivate(collectionID)
+	if err != nil {
+		return err
+	}
+
+	attachIndexInfo(col, meta)
+
+	return nil
 }
 
 // removeCollection removes the collection from collectionReplica

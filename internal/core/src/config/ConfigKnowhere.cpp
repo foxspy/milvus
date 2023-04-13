@@ -45,10 +45,10 @@ KnowhereInitImpl(const char* conf_file) {
         if (conf_file != nullptr) {
             el::Configurations el_conf(conf_file);
             el::Loggers::reconfigureAllLoggers(el_conf);
-            //LOG_SERVER_DEBUG_ << "Config easylogging with yaml file: "
-            //                 << conf_file;
+            LOG_SERVER_DEBUG_ << "Config easylogging with yaml file: "
+                              << conf_file;
         }
-        //LOG_SERVER_DEBUG_ << "Knowhere init successfully";
+        LOG_SERVER_DEBUG_ << "Knowhere init successfully";
 #endif
     };
 

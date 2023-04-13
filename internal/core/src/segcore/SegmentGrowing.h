@@ -40,8 +40,6 @@ class SegmentGrowing : public SegmentInternalInterface {
         return SegmentType::Growing;
     }
 
-    virtual SegcoreConfig&
-    getConfig() = 0;
     // virtual int64_t
     // PreDelete(int64_t size) = 0;
 

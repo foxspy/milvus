@@ -46,8 +46,8 @@ class VectorIndex : public IndexBase {
     };
 
     virtual void
-    AppendDataset(const DatasetPtr& dataset, const Config& config)  {
-        PanicInfo("vector index don't support append dataset");
+    AddWithDataset(const DatasetPtr& dataset, const Config& config)  {
+        PanicInfo("vector index don't support add with dataset");
     }
 
     virtual std::unique_ptr<SearchResult>

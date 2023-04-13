@@ -46,10 +46,11 @@ FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
 
     if (indexing_record.is_in(vecfield_id)) {
         const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_id);
-        SearchInfo search_conf(info);
         AssertInfo(vec_ptr->get_size_per_chunk() == field_indexing.get_size_per_chunk(),
                    "[FloatSearch]Chunk size of vector not equal to chunk size of field index");
+
         auto indexing = field_indexing.get_segment_indexing();
+        SearchInfo search_conf = field_indexing.get_search_params(info);
         auto vec_index = (index::VectorIndex*)(indexing);
         auto result = SearchOnIndex(search_dataset, *vec_index, search_conf, bitset);
         results.merge(result);
@@ -91,13 +92,11 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     dataset::SearchDataset search_dataset{
         metric_type, num_queries, topk, round_decimal, dim, query_data};
 
-    bool enable_segment_index = false;
-    if (segment.get_indexing_record().is_in(field.get_id())) {
-        enable_segment_index = segment.get_indexing_record().get_field_indexing(field.get_id()).get_segment_indexing() != nullptr;
-    }
-    if (enable_segment_index) {
+    auto col_name = segment.get_collection_name();
+
+    if (segment.get_indexing_record().SyncDataWithIndex(field.get_id())) {
         auto index = (index::VectorIndex*) segment.get_indexing_record().get_field_indexing(field.get_id()).get_segment_indexing();
-        segcore::TimeProfiler profiler("SearchOnSegment{" + index->GetIndexType() + "}");
+        segcore::TimeProfiler profiler("SearchOnSegmentGrowing[" + col_name + "]{" + index->GetIndexType() + "}");
         FloatSegmentIndexSearch(segment, info, query_data, num_queries, active_count, bitset, final_qr);
         results.distances_ = std::move(final_qr.mutable_distances());
         results.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
@@ -105,7 +104,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         results.total_nq_ = num_queries;
         profiler.reportRate(search_dataset.num_queries);
     } else {
-        segcore::TimeProfiler profiler("SearchOnSegment{BF}");
+        segcore::TimeProfiler profiler("SearchOnSegmentGrowing[" + col_name + "]{BF}");
         int32_t current_chunk_id = 0;
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_field_data_base(vecfield_id);

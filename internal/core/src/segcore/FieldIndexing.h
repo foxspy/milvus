@@ -22,6 +22,8 @@
 #include "AckResponder.h"
 #include "InsertRecord.h"
 #include "common/Schema.h"
+#include "common/IndexMeta.h"
+#include "IndexConfigGenerator.h"
 #include "segcore/SegcoreConfig.h"
 #include "index/VectorIndex.h"
 
@@ -40,8 +42,23 @@ class FieldIndexing {
     operator=(const FieldIndexing&) = delete;
     virtual ~FieldIndexing() = default;
 
+    // Do this in parallel
     virtual void
-    AppendSegmentIndex(int64_t reserved_offset, int64_t size, const VectorBase* vec_base) = 0;
+    BuildIndexRange(int64_t ack_beg,
+                    int64_t ack_end,
+                    const VectorBase* vec_base) = 0;
+
+    virtual void
+    AppendSegmentIndex(int64_t reserved_offset,
+                       int64_t size,
+                       const VectorBase* vec_base,
+                       const void* data_source) = 0;
+
+    virtual int64_t
+    get_build_threshold() const = 0;
+
+    virtual bool
+    sync_data_with_index() const = 0;
 
     const FieldMeta&
     get_field_meta() {
@@ -62,10 +79,11 @@ class FieldIndexing {
     virtual index::IndexBase*
     get_segment_indexing() const = 0;
 
+    std::string collection_name_;
  protected:
     // additional info
     const FieldMeta& field_meta_;
-    SegcoreConfig segcore_config_;
+    const SegcoreConfig& segcore_config_;
 };
 
 template <typename T>
@@ -74,12 +92,30 @@ class ScalarFieldIndexing : public FieldIndexing {
     using FieldIndexing::FieldIndexing;
 
     void
-    AppendSegmentIndex(int64_t reserved_offset, int64_t size, const VectorBase* vec_base) override {
+    BuildIndexRange(int64_t ack_beg,
+                    int64_t ack_end,
+                    const VectorBase* vec_base) override;
+
+    void
+    AppendSegmentIndex(int64_t reserved_offset,
+                       int64_t size,
+                       const VectorBase* vec_base,
+                       const void* data_source) override {
         PanicInfo("scalar index don't support append segment index");
     }
     idx_t
     get_index_cursor() override {
         return 0;
+    }
+
+    int64_t
+    get_build_threshold() const override {
+        return 0;
+    }
+
+    bool
+    sync_data_with_index() const override {
+        return false;
     }
 
     // concurrent
@@ -102,8 +138,23 @@ class VectorFieldIndexing : public FieldIndexing {
  public:
     using FieldIndexing::FieldIndexing;
 
+    explicit VectorFieldIndexing(const FieldMeta& field_meta, const FieldIndexMeta& field_index_meta, int64_t segment_max_row_count, const SegcoreConfig& segcore_config);
+
     void
-    AppendSegmentIndex(int64_t reserved_offset, int64_t size, const VectorBase* vec_base) override;
+    BuildIndexRange(int64_t ack_beg,
+                    int64_t ack_end,
+                    const VectorBase* vec_base) override;
+
+    void
+    AppendSegmentIndex(int64_t reserved_offset,
+                       int64_t size,
+                       const VectorBase* vec_base,
+                       const void* data_source) override;
+
+    int64_t
+    get_build_threshold() const override {
+        return config_->getBuildThreshold();
+    }
 
     // concurrent
     index::IndexBase*
@@ -116,35 +167,35 @@ class VectorFieldIndexing : public FieldIndexing {
         return index_.get();
     }
 
+    bool
+    sync_data_with_index() const override;
+
     idx_t
     get_index_cursor() override;
 
     knowhere::Json
-    get_build_params(const knowhere::IndexType& index_type) const;
+    get_build_params() const;
 
-    knowhere::Json
-    get_search_params(int top_k) const;
-
-    knowhere::Json
-    get_search_params(const knowhere::IndexType& index_type) const;
-
-    knowhere::Json
-    get_search_params(const knowhere::IndexType& indexType, int top_K) const;
+    SearchInfo
+    get_search_params(const SearchInfo& searchInfo) const;
 
  private:
     std::atomic<idx_t> index_cur_ = 0;
+    std::atomic<bool> sync_with_index;
+    std::unique_ptr<VecIndexConfig> config_;
     std::unique_ptr<index::VectorIndex> index_;
     tbb::concurrent_vector<std::unique_ptr<index::VectorIndex>> data_;
 };
 
 std::unique_ptr<FieldIndexing>
-CreateIndex(const FieldMeta& field_meta, const SegcoreConfig& segcore_config);
+CreateIndex(const FieldMeta& field_meta, const FieldIndexMeta& field_index_meta, int64_t segment_max_row_count, const SegcoreConfig& segcore_config);
 
 class IndexingRecord {
  public:
     explicit IndexingRecord(const Schema& schema,
+                            const IndexMetaPtr& indexMetaPtr,
                             const SegcoreConfig& segcore_config)
-        : schema_(schema), segcore_config_(segcore_config) {
+        : schema_(schema), index_meta_(indexMetaPtr), segcore_config_(segcore_config) {
         Initialize();
     }
 
@@ -153,31 +204,46 @@ class IndexingRecord {
         int offset_id = 0;
         for (auto& [field_id, field_meta] : schema_.get_fields()) {
             ++offset_id;
-
-            if (field_meta.is_vector()) {
+            if (field_meta.is_vector() && segcore_config_.get_enable_growing_segment_index()) {
                 // TODO: skip binary small index now, reenable after config.yaml is ready
                 if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                     continue;
                 }
-            }
 
-            field_indexings_.try_emplace(
-                field_id, CreateIndex(field_meta, segcore_config_));
+                if (index_meta_->has_field(field_id)) {
+                    field_indexings_.try_emplace(field_id, CreateIndex(field_meta, index_meta_->GetFieldIndexMeta(field_id), index_meta_->GetSegmentMaxRowCount(), segcore_config_));
+                    field_indexings_.at(field_id)->collection_name_ = index_meta_->collection_name_;
+                }
+            }
         }
         assert(offset_id == schema_.size());
     }
 
+    // concurrent, reentrant
     template <bool is_sealed>
     void
-    AppendingIndex(int64_t reserved_offset, int64_t size, const InsertRecord<is_sealed>& record) {
-        for (auto& [field_offset, entry] : field_indexings_) {
-            if (entry->get_field_meta().is_vector()) {
-                auto vec_base = record.get_field_data_base(field_offset);
-                entry->AppendSegmentIndex(reserved_offset, size, vec_base);
+    AppendingIndex(int64_t reserved_offset, int64_t size, FieldId fieldId, const DataArray* stream_data, const InsertRecord<is_sealed>& record) {
+        if (is_in(fieldId)) {
+            auto& indexing = field_indexings_.at(fieldId);
+            if (indexing->get_field_meta().is_vector() &&
+                indexing->get_field_meta().get_data_type() == DataType::VECTOR_FLOAT &&
+                reserved_offset + size >= indexing->get_build_threshold()) {
+                auto vec_base = record.get_field_data_base(fieldId);
+                indexing->AppendSegmentIndex(
+                    reserved_offset, size, vec_base, stream_data->vectors().float_vector().data().data());
             }
         }
     }
 
+    // means the index has synchronized with all inserted data
+    bool
+    SyncDataWithIndex(FieldId fieldId) const {
+        if (is_in(fieldId)) {
+            const FieldIndexing& indexing = get_field_indexing(fieldId);
+            return indexing.sync_data_with_index();
+        }
+        return false;
+    }
     // concurrent
     int64_t
     get_finished_ack() const {
@@ -215,7 +281,8 @@ class IndexingRecord {
 
  private:
     const Schema& schema_;
-    SegcoreConfig segcore_config_;
+    IndexMetaPtr index_meta_;
+    const SegcoreConfig& segcore_config_;
 
  private:
     // control info

@@ -15,6 +15,7 @@
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/helper.h"
+#include "utils/TimeProfiler.h"
 
 namespace milvus::query {
 
@@ -38,6 +39,11 @@ SearchOnSealedIndex(const Schema& schema,
     auto field_indexing = record.get_field_indexing(field_id);
     AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
                "Metric type of field index isn't the same with search info");
+
+    auto local_vec_index =
+        dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+    auto local_index_type = local_vec_index->GetIndexType();
+    segcore::TimeProfiler profiler("SearchOnSegmentSealed[" + schema.collection_name_ + "]{" + local_index_type + "}");
 
     auto final = [&] {
         auto ds = knowhere::GenDataSet(num_queries, dim, query_data);
@@ -68,6 +74,7 @@ SearchOnSealedIndex(const Schema& schema,
 
     std::copy_n(ids, total_num, result.seg_offsets_.data());
     std::copy_n(distances, total_num, result.distances_.data());
+    profiler.reportRate(num_queries);
 }
 
 void
@@ -82,6 +89,7 @@ SearchOnSealed(const Schema& schema,
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
 
+    segcore::TimeProfiler profiler("SearchOnSegmentSealed[" + schema.collection_name_ + "]{BF}");
     query::dataset::SearchDataset dataset{search_info.metric_type_,
                                           num_queries,
                                           search_info.topk_,
@@ -97,6 +105,7 @@ SearchOnSealed(const Schema& schema,
     result.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
     result.unity_topK_ = dataset.topk;
     result.total_nq_ = dataset.num_queries;
+    profiler.reportRate(num_queries);
 }
 
 }  // namespace milvus::query

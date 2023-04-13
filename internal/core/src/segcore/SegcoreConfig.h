@@ -43,6 +43,16 @@ class SegcoreConfig {
         chunk_rows_ = chunk_rows;
     }
 
+    int64_t
+    get_nlist() const {
+        return nlist_;
+    }
+
+    int64_t
+    get_nprobe() const {
+        return nprobe_;
+    }
+
     void
     set_nlist(int64_t nlist) {
         nlist_ = nlist;
@@ -53,32 +63,18 @@ class SegcoreConfig {
         nprobe_ = nprobe;
     }
 
-    int64_t
-    get_train_threshold() const {
-        if (index::is_in_no_train_list(index_type_)) {
-            return 0;
-        } else {
-            return build_threshold ;
-        }
+    void
+    set_enable_growing_segment_index(bool enable_growing_segment_index) {
+        enable_growing_segment_index_ = enable_growing_segment_index;
     }
 
-    knowhere::IndexType
-    get_index_type() const {
-        return index_type_;
+    bool
+    get_enable_growing_segment_index() const {
+        return enable_growing_segment_index_;
     }
-
-    knowhere::MetricType
-    get_metric_type() const {
-        return metric_type_;
-    }
-
- //private:
-    bool enable_segment_index_ = false;
-    knowhere::IndexType index_type_;
-    knowhere::MetricType  metric_type_;
-    int64_t build_threshold = 100000;
+ private:
+    bool enable_growing_segment_index_ = false;
     int64_t chunk_rows_ = 32 * 1024;
-    int64_t segment_size_ = 1024;
     int64_t nlist_ = 100;
     int64_t nprobe_ = 4;
 };

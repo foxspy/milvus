@@ -365,6 +365,16 @@ SegmentSealedImpl::get_schema() const {
     return *schema_;
 }
 
+std::string
+SegmentSealedImpl::get_collection_name() const {
+    return collection_name_;
+}
+
+void
+SegmentSealedImpl::set_collection_name(std::string name_) {
+    collection_name_ = name_;
+}
+
 void
 SegmentSealedImpl::mask_with_delete(BitsetType& bitset,
                                     int64_t ins_barrier,

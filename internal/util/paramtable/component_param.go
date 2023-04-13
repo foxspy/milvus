@@ -1312,9 +1312,10 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	ChunkRows        ParamItem `refreshable:"false"`
-	SmallIndexNlist  ParamItem `refreshable:"false"`
-	SmallIndexNProbe ParamItem `refreshable:"false"`
+	ChunkRows                 ParamItem `refreshable:"false"`
+	EnableGrowingSegmentIndex ParamItem `refreshable:"false"`
+	GrowingIndexNlist         ParamItem `refreshable:"false"`
+	GrowingIndexNProbe        ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -1395,8 +1396,17 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.ChunkRows.Init(base.mgr)
 
-	p.SmallIndexNlist = ParamItem{
-		Key:     "queryNode.segcore.smallIndex.nlist",
+	p.EnableGrowingSegmentIndex = ParamItem{
+		Key:          "queryNode.segcore.growing.enableGrowingSegmentIndex",
+		Version:      "2.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable segment growing with index to accelerate vector search.",
+		Export:       true,
+	}
+	p.EnableGrowingSegmentIndex.Init(base.mgr)
+
+	p.GrowingIndexNlist = ParamItem{
+		Key:     "queryNode.segcore.growing.nlist",
 		Version: "2.0.0",
 		Formatter: func(v string) string {
 			rows := p.ChunkRows.GetAsInt64()
@@ -1420,26 +1430,26 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:    "small index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8",
 		Export: true,
 	}
-	p.SmallIndexNlist.Init(base.mgr)
+	p.GrowingIndexNlist.Init(base.mgr)
 
-	p.SmallIndexNProbe = ParamItem{
-		Key:     "queryNode.segcore.smallIndex.nprobe",
+	p.GrowingIndexNProbe = ParamItem{
+		Key:     "queryNode.segcore.growing.nprobe",
 		Version: "2.0.0",
 		Formatter: func(v string) string {
-			defaultNprobe := p.SmallIndexNlist.GetAsInt64() / 16
+			defaultNprobe := p.GrowingIndexNlist.GetAsInt64() / 16
 			nprobe := getAsInt64(v)
 			if nprobe == 0 {
 				nprobe = defaultNprobe
 			}
-			if nprobe > p.SmallIndexNlist.GetAsInt64() {
-				return p.SmallIndexNlist.GetValue()
+			if nprobe > p.GrowingIndexNlist.GetAsInt64() {
+				return p.GrowingIndexNlist.GetValue()
 			}
 			return strconv.FormatInt(nprobe, 10)
 		},
 		Doc:    "nprobe to search small index, based on your accuracy requirement, must smaller than nlist",
 		Export: true,
 	}
-	p.SmallIndexNProbe.Init(base.mgr)
+	p.GrowingIndexNProbe.Init(base.mgr)
 
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",

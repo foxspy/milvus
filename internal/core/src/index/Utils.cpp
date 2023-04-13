@@ -43,14 +43,6 @@ NM_List() {
 }
 
 std::vector<IndexType>
-NO_TRAIN_List() {
-    static std::vector<IndexType> ret{
-        knowhere::IndexEnum::INDEX_HNSW,
-    };
-    return ret;
-}
-
-std::vector<IndexType>
 BIN_List() {
     static std::vector<IndexType> ret{
         knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
@@ -84,11 +76,6 @@ is_in_bin_list(const IndexType& index_type) {
 bool
 is_in_nm_list(const IndexType& index_type) {
     return is_in_list<IndexType>(index_type, NM_List);
-}
-
-bool
-is_in_no_train_list(const IndexType& index_type) {
-    return is_in_list<IndexType>(index_type, NO_TRAIN_List);
 }
 
 bool

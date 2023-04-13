@@ -13,6 +13,7 @@ find_package(Protobuf REQUIRED)
 set( proto_file_names
     schema.proto
     common.proto
+    meta.proto
     )
 
 set( PROTO_PATH  "${MILVUS_SOURCE_DIR}/../../cmake_build/thirdparty/milvus-proto/proto/")

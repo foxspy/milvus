@@ -267,10 +267,13 @@ func (node *QueryNode) InitSegcore() {
 	cChunkRows := C.int64_t(Params.QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
 
-	nlist := C.int64_t(Params.QueryNodeCfg.SmallIndexNlist.GetAsInt64())
+	cEnableGrowingSegmentIndex := C.bool(Params.QueryNodeCfg.EnableGrowingSegmentIndex.GetAsBool())
+	C.SegcoreSetEnableGrowingSegmentIndex(cEnableGrowingSegmentIndex)
+
+	nlist := C.int64_t(Params.QueryNodeCfg.GrowingIndexNlist.GetAsInt64())
 	C.SegcoreSetNlist(nlist)
 
-	nprobe := C.int64_t(Params.QueryNodeCfg.SmallIndexNProbe.GetAsInt64())
+	nprobe := C.int64_t(Params.QueryNodeCfg.GrowingIndexNProbe.GetAsInt64())
 	C.SegcoreSetNprobe(nprobe)
 
 	// override segcore SIMD type

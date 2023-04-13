@@ -62,8 +62,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            const int64_t* row_ids,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
-    std::string index_type = segcore_config_.get_index_type().empty() ? "BF" : segcore_config_.get_index_type();
-    TimeProfiler profiler("SegmentGrowingImpl.Insert[" + index_type + "]" + rangeStr(reserved_offset, size));
+    TimeProfiler profiler("SegmentGrowingImpl.Insert[" + index_meta_->collection_name_ +"]"+ rangeStr(reserved_offset, size));
     AssertInfo(insert_data->num_rows() == size, "Entities_raw count not equal to insert size");
     //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
     //               "num fields of insert data not equal to num of schema fields");
@@ -86,11 +85,16 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     for (auto [field_id, field_meta] : schema_->get_fields()) {
         AssertInfo(field_id_to_offset.count(field_id), "Cannot find field_id");
         auto data_offset = field_id_to_offset[field_id];
-        insert_record_.get_field_data_base(field_id)->set_data_raw(
-            reserved_offset,
-            size,
-            &insert_data->fields_data(data_offset),
-            field_meta);
+        if (!indexing_record_.SyncDataWithIndex(field_id)) {
+            insert_record_.get_field_data_base(field_id)->set_data_raw(
+                reserved_offset,
+                size,
+                &insert_data->fields_data(data_offset),
+                field_meta);
+        }
+        if (segcore_config_.get_enable_growing_segment_index()) {
+            indexing_record_.AppendingIndex(reserved_offset, size, field_id, &insert_data->fields_data(data_offset), insert_record_);
+        }
     }
 
     // step 4: set pks to offset
@@ -106,11 +110,6 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                                  reserved_offset + size);
-    if (segcore_config_.enable_segment_index_) {
-        if (reserved_offset + size >= segcore_config_.get_train_threshold()) {
-            indexing_record_.AppendingIndex(reserved_offset, size, insert_record_);
-        }
-    }
     profiler.reportRate(size);
 }
 
@@ -203,8 +202,6 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
                                   SearchResult& output) const {
-
-    LOG_KNOWHERE_INFO_<<"SegmentGrowingImpl vector_search";
     auto& sealed_indexing = this->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(search_info.field_id_)) {
         query::SearchOnSealedIndex(this->get_schema(),

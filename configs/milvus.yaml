@@ -113,7 +113,7 @@ pulsar:
 rocksmq:
   # The path where the message is stored in rocksmq
   # please adjust in embedded Milvus: /tmp/milvus/rdb_data
-  path: /home/liang/data/milvus/rdb_data
+  path: /home/liang/data/data/milvus/rdb_data
   lrucacheratio: 0.06 # rocksdb cache memory ratio
   rocksmqPageSize: 268435456 # 256 MB, 256 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
   retentionTimeInMinutes: 7200 # 5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.
@@ -200,9 +200,10 @@ queryNode:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
     chunkRows: 1024 # The number of vectors in a chunk.
-    smallIndex:
-      nlist: 128 # small index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8
-      nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
+    growing: # growing a vector index for growing segment to accelerate search
+      enableGrowingSegmentIndex: true
+      nlist: 128 # growing segment index nlist
+      nprobe: 16 # nprobe to search growing segment, based on your accuracy requirement, must smaller than nlist
   loadMemoryUsageFactor: 3 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: true # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -262,7 +263,7 @@ dataCoord:
   segment:
     maxSize: 512 # Maximum size of a segment in MB
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
-    sealProportion: 1.0
+    sealProportion: 0.23
     assignmentExpiration: 2000 # The time of the assignment expiration in ms
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
     # If a segment didn't accept dml records in maxIdleTime and the size of segment is greater than
@@ -281,9 +282,9 @@ dataCoord:
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
     expansionRate: 1.25
-  enableCompaction: false # Enable data segment compaction
+  enableCompaction: true # Enable data segment compaction
   compaction:
-    enableAutoCompaction: false
+    enableAutoCompaction: true
   enableGarbageCollection: true
   gc:
     interval: 3600 # gc interval in seconds
