@@ -96,7 +96,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
     if (segment.get_indexing_record().SyncDataWithIndex(field.get_id())) {
         auto index = (index::VectorIndex*) segment.get_indexing_record().get_field_indexing(field.get_id()).get_segment_indexing();
-        segcore::TimeProfiler profiler("SearchOnSegmentGrowing[" + col_name + "]{" + index->GetIndexType() + "}");
+        segcore::TimeProfiler profiler("SearchOnSegmentGrowing[" + col_name + "]{" + index->GetIndexType() + "}{" + std::to_string(segment.get_row_count()) +"}" );
         FloatSegmentIndexSearch(segment, info, query_data, num_queries, active_count, bitset, final_qr);
         results.distances_ = std::move(final_qr.mutable_distances());
         results.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
@@ -104,7 +104,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         results.total_nq_ = num_queries;
         profiler.reportRate(search_dataset.num_queries);
     } else {
-        segcore::TimeProfiler profiler("SearchOnSegmentGrowing[" + col_name + "]{BF}");
+        segcore::TimeProfiler profiler("SearchOnSegmentGrowing[" + col_name + "]{BF}{" + std::to_string(segment.get_row_count()) +"}");
         int32_t current_chunk_id = 0;
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_field_data_base(vecfield_id);

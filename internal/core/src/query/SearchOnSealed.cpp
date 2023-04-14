@@ -43,7 +43,7 @@ SearchOnSealedIndex(const Schema& schema,
     auto local_vec_index =
         dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
     auto local_index_type = local_vec_index->GetIndexType();
-    segcore::TimeProfiler profiler("SearchOnSegmentSealed[" + schema.collection_name_ + "]{" + local_index_type + "}");
+    segcore::TimeProfiler profiler("SearchOnSegmentSealed[" + schema.collection_name_ + "]{" + local_index_type + "}{" + std::to_string(local_vec_index->Count()) +"}");
 
     auto final = [&] {
         auto ds = knowhere::GenDataSet(num_queries, dim, query_data);
@@ -89,7 +89,7 @@ SearchOnSealed(const Schema& schema,
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
 
-    segcore::TimeProfiler profiler("SearchOnSegmentSealed[" + schema.collection_name_ + "]{BF}");
+    segcore::TimeProfiler profiler("SearchOnSegmentSealed[" + schema.collection_name_ + "]{BF}{" + std::to_string(row_count) +"}");
     query::dataset::SearchDataset dataset{search_info.metric_type_,
                                           num_queries,
                                           search_info.topk_,
