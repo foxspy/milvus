@@ -19,6 +19,8 @@ package querynode
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus-proto/go-api/metapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"math"
 
 	"github.com/cockroachdb/errors"
@@ -83,6 +85,30 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	// init collection meta
 	coll := w.node.metaReplica.addCollection(collectionID, w.req.Schema)
 
+	indexMetas := make([]*metapb.FieldIndexMeta, 0)
+	for _, info := range w.req.GetIndexInfoList() {
+		indexMetas = append(indexMetas, &metapb.FieldIndexMeta{
+			CollectionID:    info.GetCollectionID(),
+			FieldID:         info.GetFieldID(),
+			IndexName:       info.GetIndexName(),
+			TypeParams:      info.GetTypeParams(),
+			IndexParams:     info.GetIndexParams(),
+			IsAutoIndex:     info.GetIsAutoIndex(),
+			UserIndexParams: info.GetUserIndexParams(),
+		})
+	}
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(w.req.Schema)
+	if err != nil {
+		return errors.New("get physical channels failed, illegal channel length, collectionID = " + fmt.Sprintln(collectionID))
+	}
+	if sizePerRecord == 0 {
+		return errors.New("zero size record schema found")
+	}
+	maxRowsPerSegment := int64(Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.SegmentSealProportion.GetAsFloat() / float64(sizePerRecord))
+	w.node.metaReplica.setIndexInfo(collectionID, &metapb.CollectionIndexMeta{
+		IndexMetas:  indexMetas,
+		MaxRowCount: maxRowsPerSegment,
+	})
 	// filter out the already exist channels
 	vChannels = coll.AddChannels(vChannels, VPChannels)
 	defer func() {

@@ -16,12 +16,20 @@
 #include <iostream>
 #include "segcore/collection_c.h"
 #include "segcore/Collection.h"
+#include "log/Log.h"
 
 CCollection
 NewCollection(const char* schema_proto_blob) {
     auto proto = std::string(schema_proto_blob);
     auto collection = std::make_unique<milvus::segcore::Collection>(proto);
     return (void*)collection.release();
+}
+
+void
+SetIndexMeta(CCollection collection, const char* index_meta_proto_blob) {
+    auto col = (milvus::segcore::Collection*)collection;
+    auto proto = std::string(index_meta_proto_blob);
+    col->parseIndexMeta(proto);
 }
 
 void

@@ -25,6 +25,7 @@ package querynode
 import "C"
 import (
 	"fmt"
+	"github.com/milvus-io/milvus-proto/go-api/metapb"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -402,6 +403,17 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 
 	newCollection.setReleaseTime(Timestamp(math.MaxUint64), false)
 	return newCollection
+}
+
+func attachIndexInfo(collection *Collection, indexMeta *metapb.CollectionIndexMeta) {
+	cPtr := collection.collectionPtr
+
+	indexMetaBlob := proto.MarshalTextString(indexMeta)
+	cIndexMetaBlob := C.CString(indexMetaBlob)
+
+	log.Info("set collection index info", zap.Int64("collectionID", collection.ID()))
+
+	C.SetIndexMeta(cPtr, cIndexMetaBlob)
 }
 
 // deleteCollection delete collection and free the collection memory

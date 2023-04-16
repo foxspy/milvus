@@ -59,7 +59,7 @@ mysql:
   maxIdleConns: 5
 
 localStorage:
-  path: /var/lib/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
+  path: /home/liang/data/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
@@ -113,7 +113,7 @@ pulsar:
 rocksmq:
   # The path where the message is stored in rocksmq
   # please adjust in embedded Milvus: /tmp/milvus/rdb_data
-  path: /var/lib/milvus/rdb_data
+  path: /home/liang/data/data/milvus/rdb_data
   lrucacheratio: 0.06 # rocksdb cache memory ratio
   rocksmqPageSize: 268435456 # 256 MB, 256 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
   retentionTimeInMinutes: 7200 # 5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.
@@ -200,9 +200,10 @@ queryNode:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
     chunkRows: 1024 # The number of vectors in a chunk.
-    smallIndex:
-      nlist: 128 # small index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8
-      nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
+    growing: # growing a vector index for growing segment to accelerate search
+      enableGrowingSegmentIndex: true
+      nlist: 128 # growing segment index nlist
+      nprobe: 16 # nprobe to search growing segment, based on your accuracy requirement, must smaller than nlist
   loadMemoryUsageFactor: 3 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: true # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95

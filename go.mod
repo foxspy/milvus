@@ -185,10 +185,10 @@ require (
 )
 
 require (
-	github.com/alibabacloud-go/debug v0.0.0-20190504072949-9472017b5c68 // indirect
-	github.com/alibabacloud-go/tea v1.1.8 // indirect
 	cloud.google.com/go/compute v1.12.1 // indirect
 	cloud.google.com/go/compute/metadata v0.2.1 // indirect
+	github.com/alibabacloud-go/debug v0.0.0-20190504072949-9472017b5c68 // indirect
+	github.com/alibabacloud-go/tea v1.1.8 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
@@ -214,6 +214,7 @@ replace (
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
+	github.com/milvus-io/milvus-proto/go-api => ./cmake_build/thirdparty/milvus-proto/go-api
 )
 
 exclude github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b

@@ -165,7 +165,7 @@ class Schema {
         auto field_sizeof = field_meta.get_sizeof();
         total_sizeof_ += field_sizeof;
     }
-
+    std::string collection_name_;
  private:
     int64_t debug_id = START_USER_FIELDID;
     std::vector<FieldId> field_ids_;

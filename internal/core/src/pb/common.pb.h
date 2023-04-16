@@ -164,6 +164,7 @@ enum ErrorCode : int {
   TimeTickLongDelay = 55,
   NotReadyServe = 56,
   NotReadyCoordActivating = 57,
+  AppendingIndexError = 58,
   DataCoordNA = 100,
   DDRequestRace = 1000,
   ErrorCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),

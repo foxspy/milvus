@@ -65,6 +65,9 @@ class SegmentInterface {
     virtual const Schema&
     get_schema() const = 0;
 
+    virtual std::string
+    get_collection_name() const = 0;
+
     virtual int64_t
     get_deleted_count() const = 0;
 
@@ -119,6 +122,8 @@ class SegmentInternalInterface : public SegmentInterface {
     void
     FillPrimaryKeys(const query::Plan* plan,
                     SearchResult& results) const override;
+
+
 
     void
     FillTargetEntry(const query::Plan* plan,

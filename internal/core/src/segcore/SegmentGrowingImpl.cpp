@@ -21,6 +21,8 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
 
+#include "utils/TimeProfiler.h"
+
 namespace milvus::segcore {
 
 int64_t
@@ -60,8 +62,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            const int64_t* row_ids,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
-    AssertInfo(insert_data->num_rows() == size,
-               "Entities_raw count not equal to insert size");
+    TimeProfiler profiler("SegmentGrowingImpl.Insert[" + index_meta_->collection_name_ +"]"+ rangeStr(reserved_offset, size));
+    AssertInfo(insert_data->num_rows() == size, "Entities_raw count not equal to insert size");
     //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
     //               "num fields of insert data not equal to num of schema fields");
     // step 1: check insert data if valid
@@ -83,11 +85,16 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     for (auto [field_id, field_meta] : schema_->get_fields()) {
         AssertInfo(field_id_to_offset.count(field_id), "Cannot find field_id");
         auto data_offset = field_id_to_offset[field_id];
-        insert_record_.get_field_data_base(field_id)->set_data_raw(
-            reserved_offset,
-            size,
-            &insert_data->fields_data(data_offset),
-            field_meta);
+        if (!indexing_record_.SyncDataWithIndex(field_id)) {
+            insert_record_.get_field_data_base(field_id)->set_data_raw(
+                reserved_offset,
+                size,
+                &insert_data->fields_data(data_offset),
+                field_meta);
+        }
+        if (segcore_config_.get_enable_growing_segment_index()) {
+            indexing_record_.AppendingIndex(reserved_offset, size, field_id, &insert_data->fields_data(data_offset), insert_record_);
+        }
     }
 
     // step 4: set pks to offset
@@ -102,13 +109,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
-                                             reserved_offset + size);
-    if (enable_small_index_) {
-        int64_t chunk_rows = segcore_config_.get_chunk_rows();
-        indexing_record_.UpdateResourceAck(
-            insert_record_.ack_responder_.GetAck() / chunk_rows,
-            insert_record_);
-    }
+                                                 reserved_offset + size);
+    profiler.reportRate(size);
 }
 
 Status
