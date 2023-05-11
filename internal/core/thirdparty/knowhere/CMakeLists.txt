@@ -11,7 +11,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( KNOWHERE_VERSION 5ff16ab )
+set( KNOWHERE_VERSION  aea751b)
 
 message(STATUS "Building knowhere-${KNOWHERE_SOURCE_VER} from source")
 message(STATUS ${CMAKE_BUILD_TYPE})
@@ -31,7 +31,7 @@ endif ()
 set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
 FetchContent_Declare(
         knowhere
-        GIT_REPOSITORY  "https://github.com/milvus-io/knowhere.git"
+        GIT_REPOSITORY  "https://github.com/zilliztech/knowhere-cloud.git"
         GIT_TAG         ${KNOWHERE_VERSION}
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build
