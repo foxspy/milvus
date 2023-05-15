@@ -31,7 +31,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "exceptions/EasyAssert.h"
-
+#include "utils/mmap_alloctor.h"
 namespace milvus::segcore {
 
 template <typename Type>
@@ -137,9 +137,10 @@ class VectorBase {
 
 template <typename Type, bool is_scalar = false>
 class ConcurrentVectorImpl : public VectorBase {
- public:
+public:
     // constants
-    using Chunk = FixedVector<Type>;
+    using Chunk = typename std::conditional<std::is_same<Type, FloatVector>::value, std::vector<Type, mmap_alloctor<Type>>, FixedVector<Type>>::type;
+
     ConcurrentVectorImpl(ConcurrentVectorImpl&&) = delete;
     ConcurrentVectorImpl(const ConcurrentVectorImpl&) = delete;
 
