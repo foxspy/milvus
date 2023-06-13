@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -933,7 +934,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 	searchCtx = contextutil.PassthroughUserInGrpcMetadata(searchCtx)
 
 	// optimize search params
-	if req.Req.GetSerializedExprPlan() != nil && node.queryHook != nil {
+	if req.Req.GetSerializedExprPlan() != nil {
 		channelNum := int(req.GetTotalChannelNum())
 		if channelNum <= 0 {
 			channelNum = 1
@@ -948,27 +949,39 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 		}
 		switch plan.GetNode().(type) {
 		case *planpb.PlanNode_VectorAnns:
-			withFilter := (plan.GetVectorAnns().GetPredicates() != nil)
+			// withFilter := (plan.GetVectorAnns().GetPredicates() != nil)
 			qinfo := plan.GetVectorAnns().GetQueryInfo()
-			paramMap := map[string]interface{}{
-				common.TopKKey:        qinfo.GetTopk(),
-				common.SearchParamKey: qinfo.GetSearchParams(),
-				common.SegmentNumKey:  estSegmentNum,
-				common.WithFilterKey:  withFilter,
+			// paramMap := map[string]interface{}{
+			// 	common.TopKKey:        qinfo.GetTopk(),
+			// 	common.SearchParamKey: qinfo.GetSearchParams(),
+			// 	common.SegmentNumKey:  estSegmentNum,
+			// 	common.WithFilterKey:  withFilter,
+			// }
+			searchParamMap := make(map[string]interface{})
+			if qinfo.GetSearchParams() != "" {
+				err := json.Unmarshal([]byte(qinfo.GetSearchParams()), &searchParamMap)
+				// err := node.queryHook.Run(paramMap)
+				if err != nil {
+					failRet.Status.Reason = err.Error()
+					return failRet, nil
+				}
 			}
-			err := node.queryHook.Run(paramMap)
+			searchParamMap[common.SegmentNumKey] = estSegmentNum
+			searchParamValue, err := json.Marshal(searchParamMap)
 			if err != nil {
 				failRet.Status.Reason = err.Error()
 				return failRet, nil
 			}
-			qinfo.Topk = paramMap[common.TopKKey].(int64)
-			qinfo.SearchParams = paramMap[common.SearchParamKey].(string)
+
+			// qinfo.Topk = paramMap[common.TopKKey].(int64)
+			qinfo.SearchParams = string(searchParamValue)
 
 			SerializedExprPlan, err := proto.Marshal(plan)
 			if err != nil {
 				failRet.Status.Reason = err.Error()
 				return failRet, nil
 			}
+
 			req.Req.SerializedExprPlan = SerializedExprPlan
 			log.Debug("optimized search params done", zap.Any("queryInfo", qinfo))
 		}
