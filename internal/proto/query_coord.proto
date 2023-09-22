@@ -271,6 +271,8 @@ message FieldIndexInfo {
   int64 index_version = 9;
   int64 num_rows = 10;
   string index_engine_version = 11;
+  // TODO: @foxspy
+  int32 knowhere_minimal_version = 12;
 }
 
 enum LoadScope {

@@ -84,6 +84,8 @@ message SegmentIndex {
   uint64 serialize_size = 14;
   bool write_handoff = 15;
   string index_engine_version = 16;
+  // TODO: @foxspy
+  int32 knowhere_minimal_version = 17;
 }
 
 message RegisterNodeRequest {
@@ -154,6 +156,8 @@ message IndexFilePathInfo {
   int64 index_version = 9;
   int64 num_rows = 10;
   string index_engine_version = 11;
+  // TODO: @foxspy
+  int32 knowhere_minimal_version = 12;
 }
 
 message SegmentInfo {
@@ -226,6 +230,8 @@ message CreateJobRequest {
   repeated common.KeyValuePair type_params = 10;
   int64 num_rows = 11;
   string index_engine_version = 12;
+  // TODO: @foxspy
+  int32 knowhere_minimal_version = 13;
 }
 
 message QueryJobsRequest {

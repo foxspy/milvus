@@ -43,6 +43,12 @@ SegcoreSetKnowhereSearchThreadPoolNum(const uint32_t num_threads);
 void
 SegcoreCloseGlog();
 
+int
+GetKnowhereCurrentVersion();
+
+int
+GetKnowhereMinimalVersion();
+
 #ifdef __cplusplus
 }
 #endif

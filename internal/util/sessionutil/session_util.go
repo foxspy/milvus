@@ -78,6 +78,11 @@ const (
 	SessionUpdateEvent
 )
 
+type KnowhereVersion struct {
+	KnowhereCurrentVersion int `json:"KnowhereCurrentVersion,omitempty"`
+	KnowhereMinimalVersion int `json:"KnowhereMinimalVersion,omitempty"`
+}
+
 // Session is a struct to store service's session, including ServerID, ServerName,
 // Address.
 // Exclusive indicates that this server can only start one.
@@ -89,13 +94,14 @@ type Session struct {
 	keepAliveCancel context.CancelFunc
 	keepAliveCtx    context.Context
 
-	ServerID    int64  `json:"ServerID,omitempty"`
-	ServerName  string `json:"ServerName,omitempty"`
-	Address     string `json:"Address,omitempty"`
-	Exclusive   bool   `json:"Exclusive,omitempty"`
-	Stopping    bool   `json:"Stopping,omitempty"`
-	TriggerKill bool
-	Version     semver.Version `json:"Version,omitempty"`
+	ServerID        int64  `json:"ServerID,omitempty"`
+	ServerName      string `json:"ServerName,omitempty"`
+	Address         string `json:"Address,omitempty"`
+	Exclusive       bool   `json:"Exclusive,omitempty"`
+	Stopping        bool   `json:"Stopping,omitempty"`
+	TriggerKill     bool
+	Version         semver.Version  `json:"Version,omitempty"`
+	KnowhereVersion KnowhereVersion `json:"KnowhereVersion,omitempty"`
 
 	liveChOnce sync.Once
 	liveCh     chan struct{}
@@ -132,6 +138,14 @@ func WithRetryTimes(n int64) SessionOption {
 
 func WithResueNodeID(b bool) SessionOption {
 	return func(session *Session) { session.reuseNodeID = b }
+}
+
+// WithKnowhereVersion should be only used by querynode.
+func WithKnowhereVersion(minimal, current int) SessionOption {
+	return func(session *Session) {
+		session.KnowhereVersion.KnowhereMinimalVersion = minimal
+		session.KnowhereVersion.KnowhereCurrentVersion = current
+	}
 }
 
 func (s *Session) apply(opts ...SessionOption) {

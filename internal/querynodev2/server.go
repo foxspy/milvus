@@ -145,7 +145,12 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 }
 
 func (node *QueryNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), node.etcdCli)
+	knowhereMinimalVersion, knowhereCurrentVersion := getKnowhereVersion()
+	node.session = sessionutil.NewSession(node.ctx,
+		paramtable.Get().EtcdCfg.MetaRootPath.GetValue(),
+		node.etcdCli,
+		sessionutil.WithKnowhereVersion(knowhereMinimalVersion, knowhereCurrentVersion),
+	)
 	if node.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
@@ -239,6 +244,11 @@ func (node *QueryNode) InitSegcore() error {
 
 	initcore.InitTraceConfig(paramtable.Get())
 	return nil
+}
+
+func getKnowhereVersion() (minimal, current int) {
+	cMinimal, cCurrent := C.GetKnowhereMinimalVersion(), C.GetKnowhereCurrentVersion()
+	return int(cMinimal), int(cCurrent)
 }
 
 func (node *QueryNode) CloseSegcore() {

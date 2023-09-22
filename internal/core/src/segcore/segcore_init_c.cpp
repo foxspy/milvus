@@ -77,4 +77,16 @@ SegcoreCloseGlog() {
     }
 }
 
+extern "C" int
+GetKnowhereCurrentVersion() {
+    // TODO: @foxspy
+    return 0;
+}
+
+extern "C" int
+GetKnowhereMinimalVersion() {
+    // TODO: @foxspy
+    return 0;
+}
+
 }  // namespace milvus::segcore
