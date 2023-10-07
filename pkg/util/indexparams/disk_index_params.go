@@ -209,7 +209,7 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64)
 
 	searchCacheBudgetGBRatioStr, ok := indexParams[SearchCacheBudgetRatioKey]
 	if !ok {
-		return fmt.Errorf("index param searchCacheBudgetGBRatio not exist")
+		searchCacheBudgetGBRatioStr = "0.0"
 	}
 	SearchCacheBudgetGBRatio, err := strconv.ParseFloat(searchCacheBudgetGBRatioStr, 64)
 	if err != nil {
