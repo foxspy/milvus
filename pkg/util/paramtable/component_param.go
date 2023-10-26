@@ -2625,7 +2625,7 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 	p.EnableDisk = ParamItem{
 		Key:          "indexNode.enableDisk",
 		Version:      "2.2.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		PanicIfEmpty: true,
 		Doc:          "enable index node build disk vector index",
 		Export:       true,
