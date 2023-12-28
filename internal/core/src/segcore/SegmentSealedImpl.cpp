@@ -103,9 +103,11 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     if (get_bit(field_data_ready_bitset_, field_id)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
+        LOG_SEGCORE_INFO_ << "debug output: erase field id in LoadVecIndex!!! segment id/ field id" <<this->id_<<" "<<field_id.get();
     } else if (get_bit(binlog_index_bitset_, field_id)) {
         set_bit(binlog_index_bitset_, field_id, false);
         vector_indexings_.drop_field_indexing(field_id);
+        LOG_SEGCORE_INFO_ << "debug output: remove binlog index in LoadVecIndex!!! segment id/ field id" <<this->id_<<" "<<field_id.get();
     }
     update_row_count(row_count);
     vector_indexings_.append_field_indexing(
@@ -271,6 +273,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         // prepare data
         auto& field_meta = (*schema_)[field_id];
         auto data_type = field_meta.get_data_type();
+        LOG_SEGCORE_INFO_ << "debug output: (LoadFieldData fun) segment id"<< this->id_ <<" field id" << field_id.get() << " data type:"<< int(data_type);
 
         // Don't allow raw data and index exist at the same time
         AssertInfo(!get_bit(index_ready_bitset_, field_id),
@@ -363,6 +366,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         {
             std::unique_lock lck(mutex_);
             fields_.emplace(field_id, column);
+            LOG_SEGCORE_INFO_ << "debug output: fields.emplace() in LoadFieldData: "<<this->id_<<" field id: "<<field_id.get();
         }
 
         // set pks to offset
@@ -385,6 +389,10 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             fields_.erase(field_id);
             set_bit(field_data_ready_bitset_, field_id, false);
             use_temp_index = true;
+            LOG_SEGCORE_INFO_ << "debug output: generate_binlog_index succeed in segment id: "<<this->id_<<" field id: "<<field_id.get();
+            LOG_SEGCORE_INFO_ << "debug output: erase fields after generate_binlog_index: "<<this->id_<<" field id: "<<field_id.get();
+        } else {
+            LOG_SEGCORE_INFO_ << "debug output: !generate_binlog_index fail in segment id: "<<this->id_<<" field id: "<<field_id.get();
         }
 
         if (!use_temp_index) {
@@ -480,6 +488,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     {
         std::unique_lock lck(mutex_);
         fields_.emplace(field_id, column);
+        LOG_SEGCORE_INFO_ << "debug output: fields_.emplace in MapFieldData segment id: "<<this->id_<<" field id: "<<field_id.get();
     }
 
     auto ok = unlink(filepath.c_str());
@@ -899,6 +908,13 @@ SegmentSealedImpl::~SegmentSealedImpl() {
         for (const auto& binlog : iter.second.insert_files) {
             cc->Remove(binlog);
         }
+    }
+
+    for (const auto& pair : fields_) {
+        auto key = pair.first.get();
+        LOG_SEGCORE_INFO_<< "debug output: ~SegmentSealedImpl() segmentID:" << this->id_;
+        LOG_SEGCORE_INFO_ << "debug output: ~SegmentSealedImpl() field id: " << pair.first.get();
+        LOG_SEGCORE_INFO_ << "debug output: ~SegmentSealedImpl() shared_ptr: use count / addr" << pair.second.use_count() << "/ "<< pair.second.get();
     }
 }
 
