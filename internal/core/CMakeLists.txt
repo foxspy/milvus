@@ -47,6 +47,9 @@ else ()
 endif ()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+set(CMAKE_CXX_FLAGS
+      "-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address ${CMAKE_CXX_FLAGS}"
+)
 
 if (CMAKE_COMPILER_IS_GNUCC)
     if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 11.99)
