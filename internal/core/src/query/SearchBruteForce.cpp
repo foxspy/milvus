@@ -56,16 +56,20 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
     auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
     auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
 
+
+    std::vector<float> float_xb;
+    std::vector<float> float_xq;
+
     if (data_type == DataType::VECTOR_FLOAT16) {
         // Todo: Temporarily use cast to float32 to achieve, need to optimize
         // first, First, transfer the cast to knowhere part
         // second, knowhere partially supports float16 and removes the forced conversion to float32
         auto xb = base_dataset->GetTensor();
-        std::vector<float> float_xb(base_dataset->GetRows() *
+        float_xb.resize(base_dataset->GetRows() *
                                     base_dataset->GetDim());
 
         auto xq = query_dataset->GetTensor();
-        std::vector<float> float_xq(query_dataset->GetRows() *
+        float_xq.resize(query_dataset->GetRows() *
                                     query_dataset->GetDim());
 
         auto fp16_xb = static_cast<const float16*>(xb);
