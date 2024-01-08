@@ -12,12 +12,8 @@
 #-------------------------------------------------------------------------------
 
 # Update KNOWHERE_VERSION for the first occurrence
-set( KNOWHERE_VERSION v2.2.3 )
-set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
-if ( INDEX_ENGINE STREQUAL "cardinal" )
-    set( KNOWHERE_VERSION 2.2.3 )
-    set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere-cloud.git")
-endif()
+set( KNOWHERE_VERSION 2.2.3 )
+set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere-cloud.git")
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
 

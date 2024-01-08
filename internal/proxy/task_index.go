@@ -188,6 +188,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 			autoIndexConfig := Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 
 			useAutoIndex := func() {
+				cit.isAutoIndex = true
 				fields := make([]zap.Field, 0, len(autoIndexConfig))
 				for k, v := range autoIndexConfig {
 					indexParamsMap[k] = v

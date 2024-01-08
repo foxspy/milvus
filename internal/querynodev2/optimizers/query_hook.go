@@ -2,14 +2,16 @@ package optimizers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -23,11 +25,6 @@ type QueryHook interface {
 }
 
 func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int) (*querypb.SearchRequest, error) {
-	// no hook applied, just return
-	if queryHook == nil {
-		return req, nil
-	}
-
 	log := log.Ctx(ctx).With(zap.Int64("collection", req.GetReq().GetCollectionID()))
 
 	serializedPlan := req.GetReq().GetSerializedExprPlan()
@@ -56,20 +53,76 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		estSegmentNum := numSegments * int(channelNum)
 		withFilter := (plan.GetVectorAnns().GetPredicates() != nil)
 		queryInfo := plan.GetVectorAnns().GetQueryInfo()
-		params := map[string]any{
-			common.TopKKey:        queryInfo.GetTopk(),
-			common.SearchParamKey: queryInfo.GetSearchParams(),
-			common.SegmentNumKey:  estSegmentNum,
-			common.WithFilterKey:  withFilter,
-			common.CollectionKey:  req.GetReq().GetCollectionID(),
+
+		searchParamMap := make(map[string]interface{})
+		if queryInfo.GetSearchParams() != "" {
+			err := json.Unmarshal([]byte(queryInfo.GetSearchParams()), &searchParamMap)
+			if err != nil {
+				return nil, merr.WrapErrParameterInvalid("unmarshal search plan", "plan with unmarshal error", err.Error())
+			}
 		}
-		err := queryHook.Run(params)
+
+		var level int
+		levelValue, ok := searchParamMap["level"]
+		if !ok { // if level is not specified, set to default 1
+			level = 1
+		} else {
+			switch lValue := levelValue.(type) {
+			case float64: // for numeric values, json unmarshal will interpret it as float64
+				level = int(lValue)
+			case string:
+				level, err = strconv.Atoi(lValue)
+			default:
+				err = fmt.Errorf("wrong level in search params")
+			}
+		}
+		if err != nil {
+			level = 1
+		}
+		topk := queryInfo.GetTopk()
+		newTopk := float64(topk) / float64(estSegmentNum)
+		ef := 0
+		if level == 1 {
+			if newTopk < 10 {
+				ef = int(newTopk*1.2 + 31)
+			} else if newTopk < 90 {
+				ef = int(newTopk*0.58 + 39)
+			} else {
+				ef = int(newTopk)
+			}
+		} else if level == 2 {
+			if newTopk < 10 {
+				ef = int(newTopk*2 + 54)
+			} else if newTopk < 200 {
+				ef = int(8*math.Pow(newTopk, 0.56) + 40)
+			} else {
+				ef = int(newTopk)
+			}
+		} else {
+			if newTopk < 10 {
+				ef = int(10*math.Pow(newTopk, 0.5) + 70)
+			} else if newTopk < 300 {
+				ef = int(10*math.Pow(newTopk, 0.56) + 64)
+			} else {
+				ef = int(newTopk)
+			}
+		}
+		// with filter, we ensure ef is no less than k
+		if withFilter && ef < int(topk) {
+			ef = int(topk)
+		}
+		if ef < int(topk) {
+			topk = int64(ef)
+		}
+
+		searchParamMap["ef"] = ef
+		searchParamValue, err := json.Marshal(searchParamMap)
 		if err != nil {
 			log.Warn("failed to execute queryHook", zap.Error(err))
 			return nil, merr.WrapErrServiceUnavailable(err.Error(), "queryHook execution failed")
 		}
-		queryInfo.Topk = params[common.TopKKey].(int64)
-		queryInfo.SearchParams = params[common.SearchParamKey].(string)
+		queryInfo.Topk = topk
+		queryInfo.SearchParams = string(searchParamValue)
 		serializedExprPlan, err := proto.Marshal(&plan)
 		if err != nil {
 			log.Warn("failed to marshal optimized plan", zap.Error(err))
