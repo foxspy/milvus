@@ -1368,6 +1368,11 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
         field_meta.get_data_type() == DataType::VECTOR_FLOAT &&
         segcore_config_.get_enable_interim_segment_index()) {
         try {
+            // return true directly if binlog_index has generated
+            if (get_bit(binlog_index_bitset_, field_id)) {
+                return true;
+            }
+
             auto& field_index_meta =
                 col_index_meta_->GetFieldIndexMeta(field_id);
             auto& index_params = field_index_meta.GetIndexParams();
@@ -1407,10 +1412,10 @@ SegmentSealedImpl::generate_binlog_index(const FieldId field_id) {
                     index_metric,
                     knowhere::Version::GetCurrentVersion().VersionNumber());
             vec_index->BuildWithDataset(dataset, build_config);
-            vector_indexings_.append_field_indexing(
-                field_id, index_metric, std::move(vec_index));
             {
                 std::unique_lock lck(mutex_);
+                vector_indexings_.append_field_indexing(
+                        field_id, index_metric, std::move(vec_index));
                 vec_binlog_config_[field_id] = std::move(field_binlog_config);
                 set_bit(binlog_index_bitset_, field_id, true);
             }
