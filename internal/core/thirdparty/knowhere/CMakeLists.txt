@@ -14,6 +14,7 @@
 # Update KNOWHERE_VERSION for the first occurrence
 set( KNOWHERE_VERSION add_skip_refine_support )
 set( GIT_REPOSITORY  "https://github.com/foxspy/knowhere.git")
+
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
 
