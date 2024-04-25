@@ -12,8 +12,8 @@
 #-------------------------------------------------------------------------------
 
 # Update KNOWHERE_VERSION for the first occurrence
-set( KNOWHERE_VERSION v2.3.0 )
-set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
+set( KNOWHERE_VERSION add_skip_refine_test_23 )
+set( GIT_REPOSITORY  "https://github.com/foxspy/knowhere.git")
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
 
