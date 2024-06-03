@@ -110,6 +110,9 @@ const (
 	MaxCapacityKey = "max_capacity"
 
 	DropRatioBuildKey = "drop_ratio_build"
+
+	BinaryBuild = "binary_build"
+	SparseBuild = "sparse_build"
 )
 
 //  Collection properties key
