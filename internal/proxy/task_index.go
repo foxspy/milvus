@@ -175,6 +175,8 @@ func (cit *createIndexTask) parseIndexParams() error {
 				zap.String("original type", specifyIndexType),
 				zap.String("final type", Params.AutoIndexConfig.AutoIndexTypeName.GetValue()))
 
+			log.Info("build index auto params", zap.String("param", Params.AutoIndexConfig.IndexParams.GetValue()))
+
 			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) {
