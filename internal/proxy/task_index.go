@@ -186,6 +186,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 				}
 			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) {
 				sparseParamStr := Params.AutoIndexConfig.IndexParams.GetAsJSONMap()[common.SparseBuild]
+				log.Info("parse sparse build param", zap.String("param", sparseParamStr))
 				sparseParam, err := funcutil.JSONToMap(sparseParamStr)
 				if err != nil {
 					return err
@@ -195,6 +196,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 				}
 			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
 				binaryParamStr := Params.AutoIndexConfig.IndexParams.GetAsJSONMap()[common.BinaryBuild]
+				log.Info("parse binary build param", zap.String("param", binaryParamStr))
 				binaryParam, err := funcutil.JSONToMap(binaryParamStr)
 				if err != nil {
 					return err
