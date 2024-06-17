@@ -116,6 +116,7 @@ Search(CTraceContext c_trace,
         milvus::tracer::CloseRootSpan();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
+        std::abort();
         return milvus::FailureCStatus(&e);
     }
 }
