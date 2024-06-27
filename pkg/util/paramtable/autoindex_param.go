@@ -78,7 +78,7 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 	p.SparseIndexParams = ParamItem{
 		Key:          "autoIndex.params.sparse.build",
 		Version:      "2.4.5",
-		DefaultValue: `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`,
+		DefaultValue: `{"M": 30, "efConstruction": 360, "index_type": "CardinalPerf"}`,
 		Export:       true,
 	}
 	p.SparseIndexParams.Init(base.mgr)
@@ -86,7 +86,7 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 	p.BinaryIndexParams = ParamItem{
 		Key:          "autoIndex.params.binary.build",
 		Version:      "2.4.5",
-		DefaultValue: `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "HAMMING"}`,
+		DefaultValue: `{"M": 30, "efConstruction": 360, "index_type": "CardinalPerf"}`,
 		Export:       true,
 	}
 	p.BinaryIndexParams.Init(base.mgr)
