@@ -54,6 +54,9 @@ const (
 	GPUIvfFlat IndexType = "GPU_IVF_FLAT"
 	GPUIvfPQ   IndexType = "GPU_IVF_PQ"
 
+	CardinalCap  IndexType = "CardinalCap"
+	CardinalPerf IndexType = "CardinalPerf"
+
 	GPUCagra      IndexType = "GPU_CAGRA"
 	GPUBruteForce IndexType = "GPU_BRUTE_FORCE"
 
