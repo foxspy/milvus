@@ -60,7 +60,7 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 	if err != nil {
 		return 0, 0, fmt.Errorf("index type not exist in index params")
 	}
-	if indexType == indexparamcheck.IndexDISKANN {
+	if indexType == indexparamcheck.IndexDISKANN || indexType == indexparamcheck.IndexCardinalCap {
 		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio
 		neededDiskSize := indexInfo.IndexSize - neededMemSize
 		return uint64(neededMemSize), uint64(neededDiskSize), nil

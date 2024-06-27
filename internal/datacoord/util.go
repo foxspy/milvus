@@ -207,11 +207,20 @@ func isFlatIndex(indexType string) bool {
 }
 
 func isOptionalScalarFieldSupported(indexType string) bool {
-	return indexType == indexparamcheck.IndexHNSW
+	return indexType == indexparamcheck.IndexHNSW || indexType == indexparamcheck.IndexCardinalPerf
 }
 
 func isDiskANNIndex(indexType string) bool {
-	return indexType == indexparamcheck.IndexDISKANN
+	return indexType == indexparamcheck.IndexDISKANN || indexType == indexparamcheck.IndexCardinalCap
+}
+
+func IsCardinalIndex(indexParams []*commonpb.KeyValuePair) bool {
+	for _, param := range indexParams {
+		if param.Key == common.IndexTypeKey {
+			return param.Value == indexparamcheck.IndexCardinalCap || param.Value == indexparamcheck.IndexCardinalPerf
+		}
+	}
+	return false
 }
 
 func parseBuildIDFromFilePath(key string) (UniqueID, error) {

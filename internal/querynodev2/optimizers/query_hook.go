@@ -24,9 +24,9 @@ type QueryHook interface {
 	DeleteTuningConfig(string) error
 }
 
-func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int) (*querypb.SearchRequest, error) {
+func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int, autoIndex bool) (*querypb.SearchRequest, error) {
 	// no hook applied or disabled, just return
-	if queryHook == nil || !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+	if queryHook == nil || !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() || !autoIndex {
 		return req, nil
 	}
 

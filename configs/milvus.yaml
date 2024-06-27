@@ -383,6 +383,8 @@ queryCoord:
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
+  # replace the string with file path of autoIndex.so
+  soPath: /xxx/autoindex.so
   stats:
     publishInterval: 1000 # The interval that query node publishes the node statistics information, including segment status, cpu usage, memory usage, health status, etc. Unit: ms.
   segcore:
@@ -417,7 +419,7 @@ queryNode:
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
     chunkCache: true # Enable mmap for chunk cache (raw vector retrieving).
-    # Enable memory mapping (mmap) to optimize the handling of growing raw data. 
+    # Enable memory mapping (mmap) to optimize the handling of growing raw data.
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
     growingMmapEnabled: false
@@ -545,7 +547,7 @@ dataCoord:
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
     indexBasedCompaction: true
-    # compaction task prioritizer, options: [default, level, mix]. 
+    # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
     # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
@@ -1028,3 +1030,19 @@ trace:
 gpu:
   initMemSize: 2048 # Gpu Memory Pool init size
   maxMemSize: 4096 # Gpu Memory Pool Max size
+
+autoIndex:
+  enable: true
+  type: "HighPerf" # "BigData"
+  params:
+    build: | # Parameters required to build the index, json format string. if empty, autoIndex is disabled
+      {
+        "M": 30,
+        "efConstruction": 360,
+        "index_type": "CardinalPerf"
+      }
+    extra: {}
+    search: | # Parameters required for the search, in json string format. if empty, autoIndex is disabled
+      {
+         "tuning_type": "perf"
+      }

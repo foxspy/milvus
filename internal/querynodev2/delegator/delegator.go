@@ -20,6 +20,7 @@ package delegator
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/datacoord"
 	"path"
 	"strconv"
 	"sync"
@@ -244,7 +245,20 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		zap.Int("growingNum", len(growing)),
 	)
 
-	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
+	autoIndex := false
+	sealedSegments := sd.segmentManager.GetBy(segments.WithType(segments.SegmentTypeSealed))
+	if len(sealedSegments) > 0 {
+		sealedSegment := sealedSegments[0]
+		indexes := sealedSegment.Indexes()
+		for _, index := range indexes {
+			indexParam := index.IndexInfo.IndexParams
+			if datacoord.IsCardinalIndex(indexParam) {
+				autoIndex = true
+			}
+		}
+	}
+
+	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum, autoIndex)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err

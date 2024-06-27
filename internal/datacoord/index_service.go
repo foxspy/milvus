@@ -222,7 +222,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
-		if GetIndexType(req.GetIndexParams()) == indexparamcheck.IndexDISKANN && !s.indexNodeManager.ClientSupportDisk() {
+		if isDiskANNIndex(GetIndexType(req.GetIndexParams())) && !s.indexNodeManager.ClientSupportDisk() {
 			errMsg := "all IndexNodes do not support disk indexes, please verify"
 			log.Warn(errMsg)
 			err = merr.WrapErrIndexNotSupported(indexparamcheck.IndexDISKANN)
