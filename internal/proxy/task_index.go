@@ -189,7 +189,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 		}
 	} else {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
-		if Params.AutoIndexConfig.Enable.GetAsBool() { // `enable` only for cloud instance.
+		if Params.AutoIndexConfig.Enable.GetAsBool() && specifyIndexType == AutoIndexName { // `enable` only for cloud instance.
 			log.Info("create index trigger AutoIndex",
 				zap.String("original type", specifyIndexType),
 				zap.String("final type", Params.AutoIndexConfig.AutoIndexTypeName.GetValue()))
@@ -286,7 +286,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 		if !exist {
 			return fmt.Errorf("IndexType not specified")
 		}
-		if indexType == indexparamcheck.IndexDISKANN {
+		if indexType == indexparamcheck.IndexDISKANN || indexType == indexparamcheck.IndexCardinalCap {
 			err := indexparams.FillDiskIndexParams(Params, indexParamsMap)
 			if err != nil {
 				return err

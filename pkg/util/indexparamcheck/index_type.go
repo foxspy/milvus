@@ -29,7 +29,9 @@ const (
 	IndexFaissBinIDMap   IndexType = "BIN_FLAT"
 	IndexFaissBinIvfFlat IndexType = "BIN_IVF_FLAT"
 	IndexHNSW            IndexType = "HNSW"
+	IndexCardinalPerf    IndexType = "CardinalPerf"
 	IndexDISKANN         IndexType = "DISKANN"
+	IndexCardinalCap     IndexType = "CardinalCap"
 	IndexSparseInverted  IndexType = "SPARSE_INVERTED_INDEX"
 	IndexSparseWand      IndexType = "SPARSE_WAND"
 	IndexINVERTED        IndexType = "INVERTED"
@@ -61,5 +63,5 @@ func IsMmapSupported(indexType IndexType) bool {
 }
 
 func IsDiskIndex(indexType IndexType) bool {
-	return indexType == IndexDISKANN
+	return indexType == IndexDISKANN || indexType == IndexCardinalCap
 }
