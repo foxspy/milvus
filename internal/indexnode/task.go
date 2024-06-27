@@ -101,7 +101,7 @@ func (it *indexBuildTaskV2) BuildIndex(ctx context.Context) error {
 	}
 
 	indexType := it.newIndexParams[common.IndexTypeKey]
-	if indexType == indexparamcheck.IndexDISKANN {
+	if indexType == indexparamcheck.IndexDISKANN || indexType == indexparamcheck.IndexCardinalCap {
 		// check index node support disk index
 		if !Params.IndexNodeCfg.EnableDisk.GetAsBool() {
 			log.Ctx(ctx).Warn("IndexNode don't support build disk index",
@@ -445,7 +445,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 	}
 
 	indexType := it.newIndexParams[common.IndexTypeKey]
-	if indexType == indexparamcheck.IndexDISKANN {
+	if indexType == indexparamcheck.IndexDISKANN || indexType == indexparamcheck.IndexCardinalCap {
 		// check index node support disk index
 		if !Params.IndexNodeCfg.EnableDisk.GetAsBool() {
 			log.Ctx(ctx).Warn("IndexNode don't support build disk index",

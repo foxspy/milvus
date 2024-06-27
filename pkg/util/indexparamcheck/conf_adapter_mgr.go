@@ -55,7 +55,9 @@ func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
 	mgr.checkers[IndexFaissBinIDMap] = newBinFlatChecker()
 	mgr.checkers[IndexFaissBinIvfFlat] = newBinIVFFlatChecker()
 	mgr.checkers[IndexHNSW] = newHnswChecker()
+	mgr.checkers[IndexCardinalPerf] = newCardinalChecker()
 	mgr.checkers[IndexDISKANN] = newDiskannChecker()
+	mgr.checkers[IndexCardinalCap] = newCardinalChecker()
 	mgr.checkers[IndexSparseInverted] = newSparseInvertedIndexChecker()
 	// WAND doesn't have more index params than sparse inverted index, thus
 	// using the same checker.

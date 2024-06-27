@@ -104,7 +104,7 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, indexInfo *que
 	}
 
 	// some build params also exist in indexParams, which are useless during loading process
-	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
+	if indexParams["index_type"] == indexparamcheck.IndexDISKANN || indexParams["index_type"] == indexparamcheck.IndexCardinalCap {
 		err = indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows())
 		if err != nil {
 			return err

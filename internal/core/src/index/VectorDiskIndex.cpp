@@ -203,7 +203,7 @@ VectorDiskAnnIndex<T>::BuildV2(const Config& config) {
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
-    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+    if (isDiskANN()) {
         auto num_threads = GetValueFromConfig<std::string>(
             build_config, DISK_ANN_BUILD_THREAD_NUM);
         AssertInfo(
@@ -250,7 +250,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
-    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+    if (isDiskANN()) {
         auto num_threads = GetValueFromConfig<std::string>(
             build_config, DISK_ANN_BUILD_THREAD_NUM);
         AssertInfo(
@@ -296,7 +296,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
-    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+    if (isDiskANN()) {
         auto num_threads = GetValueFromConfig<std::string>(
             build_config, DISK_ANN_BUILD_THREAD_NUM);
         AssertInfo(
@@ -346,7 +346,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 
     knowhere::Json search_config = PrepareSearchParams(search_info);
 
-    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+    if (isDiskANN()) {
         // set search list size
         if (CheckKeyInConfig(search_info.search_params_, DISK_ANN_QUERY_LIST)) {
             search_config[DISK_ANN_SEARCH_LIST_SIZE] =
@@ -477,7 +477,7 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
     load_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
-    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+    if (isDiskANN()) {
         // set base info
         load_config[DISK_ANN_PREPARE_WARM_UP] = false;
         load_config[DISK_ANN_PREPARE_USE_BFS_CACHE] = false;

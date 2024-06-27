@@ -19,6 +19,7 @@ package indexparams
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"strconv"
 	"unsafe"
 
@@ -48,6 +49,12 @@ const (
 
 	MaxLoadThread = 64
 	MaxBeamWidth  = 16
+
+	IndexType   = "index_type"
+	CardinalCap = "CardinalCap"
+
+	MMapConfigKey = "mmap_config_key"
+	MMapConfigVal = "0.75"
 )
 
 var configableIndexParams = typeutil.NewSet[string]()
@@ -171,7 +178,9 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	var buildNumThreadsRatio string
 	var searchCacheBudgetGBRatio string
 
-	if params.AutoIndexConfig.Enable.GetAsBool() {
+	indexType, _ := indexParams[common.IndexTypeKey]
+
+	if params.AutoIndexConfig.Enable.GetAsBool() && indexType == indexparamcheck.IndexCardinalCap {
 		indexParams := params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 		var ok bool
 		maxDegree, ok = indexParams[MaxDegreeKey]
@@ -220,7 +229,10 @@ func UpdateDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams [
 	existedVal := GetIndexParams(indexParams, SearchCacheBudgetRatioKey)
 
 	var searchCacheBudgetGBRatio string
-	if params.AutoIndexConfig.Enable.GetAsBool() {
+
+	indexType := GetIndexParams(indexParams, IndexType)
+
+	if params.AutoIndexConfig.Enable.GetAsBool() && indexType == CardinalCap {
 		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
 			return indexParams, fmt.Errorf("index param search_cache_budget_gb_ratio not exist in AutoIndex Config")
@@ -315,7 +327,9 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 	var loadNumThreadRatio float64
 	var beamWidthRatio float64
 
-	if params.AutoIndexConfig.Enable.GetAsBool() {
+	indexType := indexParams["index_type"]
+
+	if params.AutoIndexConfig.Enable.GetAsBool() && indexType == indexparamcheck.IndexCardinalCap {
 		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
 			return err
@@ -358,6 +372,9 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 
 func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[string]string) error {
 	if params.AutoIndexConfig.Enable.GetAsBool() { // `enable` only for cloud instance.
+		if params.AutoIndexConfig.AutoIndexTypeName.GetValue() == "BigData" {
+			indexParams[MMapConfigKey] = MMapConfigVal
+		}
 		// override prepare params by
 		for k, v := range params.AutoIndexConfig.PrepareParams.GetAsJSONMap() {
 			indexParams[k] = v

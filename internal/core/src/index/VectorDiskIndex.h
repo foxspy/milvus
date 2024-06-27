@@ -116,6 +116,10 @@ class VectorDiskAnnIndex : public VectorIndex {
     knowhere::Json
     update_load_json(const Config& config);
 
+    bool isDiskANN() const {
+        return GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN || GetIndexType() == "CardinalCap";
+    }
+
  private:
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::DiskFileManagerImpl> file_manager_;
