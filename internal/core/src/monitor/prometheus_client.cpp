@@ -9,9 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "storage/prometheus_client.h"
+#include "prometheus_client.h"
 
-namespace milvus::storage {
+namespace milvus::monitor {
 
 const prometheus::Histogram::BucketBoundaries buckets = {1,
                                                          2,
@@ -193,4 +193,4 @@ DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_anon,
 DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_file,
                         internal_mmap_in_used_space_bytes,
                         mmapAllocatedSpaceFileLabel)
-}  // namespace milvus::storage
+}  // namespace milvus::monitor

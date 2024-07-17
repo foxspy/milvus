@@ -17,13 +17,12 @@
 package config
 
 import (
+	"gopkg.in/yaml.v3"
 	"os"
 	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"github.com/spf13/cast"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -115,7 +114,6 @@ func (fs *FileSource) UpdateOptions(opts Options) {
 }
 
 func (fs *FileSource) loadFromFile() error {
-	yamlReader := viper.New()
 	newConfig := make(map[string]string)
 	var configFiles []string
 
@@ -128,38 +126,19 @@ func (fs *FileSource) loadFromFile() error {
 			continue
 		}
 
-		yamlReader.SetConfigFile(configFile)
-		if err := yamlReader.ReadInConfig(); err != nil {
+		data, err := os.ReadFile(configFile)
+		if err != nil {
 			return errors.Wrap(err, "Read config failed: "+configFile)
 		}
 
-		for _, key := range yamlReader.AllKeys() {
-			val := yamlReader.Get(key)
-			str, err := cast.ToStringE(val)
-			if err != nil {
-				switch val := val.(type) {
-				case []any:
-					str = str[:0]
-					for _, v := range val {
-						ss, err := cast.ToStringE(v)
-						if err != nil {
-							log.Warn("cast to string failed", zap.Any("value", v))
-						}
-						if str == "" {
-							str = ss
-						} else {
-							str = str + "," + ss
-						}
-					}
+		var config map[string]interface{}
 
-				default:
-					log.Warn("val is not a slice", zap.Any("value", val))
-					continue
-				}
-			}
-			newConfig[key] = str
-			newConfig[formatKey(key)] = str
+		err = yaml.Unmarshal(data, &config)
+		if err != nil {
+			return errors.Wrap(err, "Unmarshal config failed: "+configFile)
 		}
+
+		parseConfig("", config, newConfig)
 	}
 
 	return fs.update(newConfig)

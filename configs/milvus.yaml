@@ -846,3 +846,22 @@ trace:
 gpu:
   initMemSize:  # Gpu Memory Pool init size
   maxMemSize:  # Gpu Memory Pool Max size
+
+
+knowhere:
+  HNSW:
+    build:
+      efConstruction : 360
+      M: 30
+    load:
+      mmap: false
+    search:
+      ef: 30
+  DISKANN:
+    build:
+      pqCacheRatio: 0.125
+      maxDegree: 60
+    load:
+      cacheRatio: 0.1
+    search:
+      beamRatio: 4.0
