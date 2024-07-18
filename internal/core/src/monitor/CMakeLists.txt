@@ -14,7 +14,6 @@ set(MONITOR_SRC
         prometheus_client.cpp
         )
 
-add_library(milvus_monitor STATIC ${MONITOR_SRC})
+add_library(milvus_monitor SHARED ${MONITOR_SRC})
 
-set_target_properties(milvus_monitor PROPERTIES RULE_LAUNCH_COMPILE "")
-set_target_properties(milvus_monitor PROPERTIES RULE_LAUNCH_LINK "")
+install(TARGETS milvus_monitor DESTINATION "${CMAKE_INSTALL_LIBDIR}")
