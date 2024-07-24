@@ -23,9 +23,9 @@ func (c cardinalChecker) CheckTrain(params map[string]string) error {
 	return c.baseChecker.CheckTrain(params)
 }
 
-func (c cardinalChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if !typeutil.IsVectorType(dType) {
-		return fmt.Errorf("can't create hnsw in not vector type")
+func (c cardinalChecker) CheckValidDataType(field *schemapb.FieldSchema) error {
+	if !typeutil.IsVectorType(field.GetDataType()) {
+		return fmt.Errorf("can't build cardinal in not vector type")
 	}
 	return nil
 }
