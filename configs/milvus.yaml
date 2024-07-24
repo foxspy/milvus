@@ -315,8 +315,6 @@ queryCoord:
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
-  # replace the string with file path of autoIndex.so
-  soPath: /xxx/autoindex.so
   stats:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
