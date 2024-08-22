@@ -1293,7 +1293,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 	delete(indexParams, common.MmapEnabledKey)
 
 	// some build params also exist in indexParams, which are useless during loading process
-	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
+	if indexParams["index_type"] == indexparamcheck.IndexDISKANN || indexParams["index_type"] == indexparamcheck.IndexCardinalCap {
 		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
 			return err
 		}

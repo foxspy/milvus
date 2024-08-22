@@ -65,7 +65,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SerializedExprPlan: bs,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, true)
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 50, `{"param": 2}`)
 	})
@@ -93,7 +93,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SerializedExprPlan: bs,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, true)
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, `{"param": 1}`)
 	})
@@ -120,7 +120,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SerializedExprPlan: bs,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, true)
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, `{"param": 1}`)
 	})
@@ -149,7 +149,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SerializedExprPlan: bs,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, true)
 		suite.NoError(err)
 		suite.Equal(bs, req.GetReq().GetSerializedExprPlan())
 	})
@@ -164,7 +164,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 		_, err := OptimizeSearchParams(ctx, &querypb.SearchRequest{
 			Req:             &internalpb.SearchRequest{},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, true)
 		suite.Error(err)
 	})
 
@@ -198,7 +198,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			Req: &internalpb.SearchRequest{
 				SerializedExprPlan: bs,
 			},
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, true)
 		suite.Error(err)
 	})
 }

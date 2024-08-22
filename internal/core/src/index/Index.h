@@ -75,6 +75,7 @@ class IndexBase {
     bool
     IsMmapSupported() const {
         return index_type_ == knowhere::IndexEnum::INDEX_HNSW ||
+               index_type_ == "CardinalPerf" ||
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC ||
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFPQ ||
