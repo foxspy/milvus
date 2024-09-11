@@ -79,7 +79,7 @@ func (c vecIndexChecker) CheckTrain(dataType schemapb.DataType, params map[strin
 
 func (c vecIndexChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	if !typeutil.IsVectorType(field.GetDataType()) {
-		return fmt.Errorf("index %s only support vector data type", indexType)
+		return fmt.Errorf("index %s only supports vector data type", indexType)
 	}
 	if !GetVecIndexMgrInstance().IsDataTypeSupport(indexType, field.GetDataType()) {
 		return fmt.Errorf("index %s do not support data type: %s", indexType, schemapb.DataType_name[int32(field.GetDataType())])
