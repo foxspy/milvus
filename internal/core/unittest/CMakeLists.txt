@@ -66,6 +66,7 @@ set(MILVUS_TEST_FILES
         test_plan_proto.cpp
         test_query.cpp
         test_range_search_sort.cpp
+        test_load_index_with_manager.cpp
         test_reduce_c.cpp
         test_reduce.cpp
         test_regex_query.cpp
