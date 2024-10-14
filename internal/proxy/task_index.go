@@ -341,7 +341,14 @@ func (cit *createIndexTask) parseIndexParams() error {
 		if !exist {
 			return fmt.Errorf("IndexType not specified")
 		}
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
+		if Params.IndexEngineConfig.Enable.GetAsBool() {
+			var err error
+			indexParamsMap, err = Params.IndexEngineConfig.MergeRequestMapParam(indexType, paramtable.BuildStage, indexParamsMap)
+			if err != nil {
+				return err
+			}
+		}
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex(indexType) {
 			err := indexparams.FillDiskIndexParams(Params, indexParamsMap)
 			if err != nil {
 				return err
