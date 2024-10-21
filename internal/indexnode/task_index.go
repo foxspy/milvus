@@ -248,8 +248,9 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	if Params.IndexEngineConfig.Enable.GetAsBool() {
-		it.newIndexParams, _ = Params.IndexEngineConfig.MergeWithResource(fieldDataSize, it.newIndexParams)
+	// system resource-related parameters, such as memory limits, CPU limits, and disk limits, are appended here to the parameter list
+	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && Params.KnowhereConfig.Enable.GetAsBool() {
+		it.newIndexParams, _ = Params.KnowhereConfig.MergeResourceParams(fieldDataSize, paramtable.BuildStage, it.newIndexParams)
 	}
 
 	storageConfig := &indexcgopb.StorageConfig{

@@ -341,14 +341,15 @@ func (cit *createIndexTask) parseIndexParams() error {
 		if !exist {
 			return fmt.Errorf("IndexType not specified")
 		}
-		if Params.IndexEngineConfig.Enable.GetAsBool() {
+		//  index parameters defined in the YAML file are merged with the user-provided parameters during create stage
+		if Params.KnowhereConfig.Enable.GetAsBool() {
 			var err error
-			indexParamsMap, err = Params.IndexEngineConfig.MergeRequestMapParam(indexType, paramtable.BuildStage, indexParamsMap)
+			indexParamsMap, err = Params.KnowhereConfig.MergeIndexParams(indexType, paramtable.BuildStage, indexParamsMap)
 			if err != nil {
 				return err
 			}
 		}
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex(indexType) {
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 			err := indexparams.FillDiskIndexParams(Params, indexParamsMap)
 			if err != nil {
 				return err

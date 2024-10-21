@@ -9,7 +9,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 )
 
-type indexEngineConfig struct {
+type knowhereConfig struct {
 	Enable     ParamItem  `refreshable:"true"`
 	IndexParam ParamGroup `refreshable:"true"`
 }
@@ -26,7 +26,7 @@ const (
 	VecFieldSizeKey    = "vec_field_size_gb"
 )
 
-func (p *indexEngineConfig) init(base *BaseTable) {
+func (p *knowhereConfig) init(base *BaseTable) {
 	p.IndexParam = ParamGroup{
 		KeyPrefix: "knowhere.",
 		Version:   "2.5.0",
@@ -36,12 +36,12 @@ func (p *indexEngineConfig) init(base *BaseTable) {
 	p.Enable = ParamItem{
 		Key:          "knowhere.enable",
 		Version:      "2.5.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 	}
 	p.Enable.Init(base.mgr)
 }
 
-func (p *indexEngineConfig) getIndexParam(indexType string, stage string) map[string]string {
+func (p *knowhereConfig) getIndexParam(indexType string, stage string) map[string]string {
 	matchedParam := make(map[string]string)
 
 	params := p.IndexParam.GetValue()
@@ -65,7 +65,7 @@ func GetKeyFromSlice(indexParams []*commonpb.KeyValuePair, key string) string {
 	return ""
 }
 
-func (p *indexEngineConfig) GetRuntimeParam(stage string) (map[string]string, error) {
+func (p *knowhereConfig) GetRuntimeParameter(stage string) (map[string]string, error) {
 	params := make(map[string]string)
 
 	if stage == BuildStage {
@@ -76,7 +76,7 @@ func (p *indexEngineConfig) GetRuntimeParam(stage string) (map[string]string, er
 	return params, nil
 }
 
-func (p *indexEngineConfig) MergeRequestParam(indexType string, stage string, indexParams []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
+func (p *knowhereConfig) UpdateIndexParams(indexType string, stage string, indexParams []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
 	defaultParams := p.getIndexParam(indexType, stage)
 
 	for key, val := range defaultParams {
@@ -92,19 +92,7 @@ func (p *indexEngineConfig) MergeRequestParam(indexType string, stage string, in
 	return indexParams, nil
 }
 
-func (p *indexEngineConfig) MergeWithResource(vecFieldSize uint64, indexParam map[string]string) (map[string]string, error) {
-	param, _ := p.GetRuntimeParam(BuildStage)
-
-	for key, val := range param {
-		indexParam[key] = val
-	}
-
-	indexParam[VecFieldSizeKey] = fmt.Sprintf("%f", float32(vecFieldSize)/(1<<30))
-
-	return indexParam, nil
-}
-
-func (p *indexEngineConfig) MergeRequestMapParam(indexType string, stage string, indexParam map[string]string) (map[string]string, error) {
+func (p *knowhereConfig) MergeIndexParams(indexType string, stage string, indexParam map[string]string) (map[string]string, error) {
 	defaultParams := p.getIndexParam(indexType, stage)
 
 	for key, val := range defaultParams {
@@ -113,6 +101,18 @@ func (p *indexEngineConfig) MergeRequestMapParam(indexType string, stage string,
 			indexParam[key] = val
 		}
 	}
+
+	return indexParam, nil
+}
+
+func (p *knowhereConfig) MergeResourceParams(vecFieldSize uint64, stage string, indexParam map[string]string) (map[string]string, error) {
+	param, _ := p.GetRuntimeParameter(stage)
+
+	for key, val := range param {
+		indexParam[key] = val
+	}
+
+	indexParam[VecFieldSizeKey] = fmt.Sprintf("%f", float32(vecFieldSize)/(1<<30))
 
 	return indexParam, nil
 }
