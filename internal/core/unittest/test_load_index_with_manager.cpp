@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <string>
 #include <fstream>
+#include <filesystem>
 #include <vector>
 #include <unistd.h>
 
@@ -39,6 +40,8 @@
 #include "storage/Util.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/LocalChunkManagerSingleton.h"
+
+
 
 #include "test_utils/storage_test_utils.h"
 
@@ -62,6 +65,21 @@ class DiskAnnFileManagerLoadTest : public testing::Test {
  protected:
     ChunkManagerPtr cm_;
 };
+
+namespace fs = std::filesystem;
+
+std::vector<std::string> getAllFiles(const fs::path& directory) {
+    std::vector<std::string> filePaths;
+
+    // Iterate through directory and subdirectories
+    for (const auto& entry : fs::recursive_directory_iterator(directory)) {
+        if (fs::is_regular_file(entry.path())) {
+            filePaths.push_back(entry.path().string());
+        }
+    }
+
+    return filePaths;
+}
 
 TEST_F(DiskAnnFileManagerLoadTest, LoadWithManager) {
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -95,6 +113,32 @@ TEST_F(DiskAnnFileManagerLoadTest, LoadWithManager) {
         remote_files.emplace_back(file2size.first);
     }
     diskAnnFileManager->CacheIndexToDisk(remote_files);
+    auto local_files = diskAnnFileManager->GetLocalFilePaths();
+
+    for (auto file : local_files) {
+        cm_->Remove(file);
+    }
+}
+
+TEST_F(DiskAnnFileManagerLoadTest, LoadRawData) {
+    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    uint64_t index_size = 50 << 20;
+
+    // collection_id: 1, partition_id: 2, segment_id: 3
+    // field_id: 100, index_build_id: 1000, index_version: 1
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+
+    int64_t slice_size = milvus::FILE_SLICE_SIZE;
+    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(filed_data_meta, index_meta, cm_));
+
+    std::vector<std::string> remote_files = getAllFiles("/home/fox/Downloads/in01-0e3f674f63dfafd_101/101/");
+    for (auto file : remote_files) {
+        std::cout<<" file "<< file<<std::endl;
+    }
+
+    diskAnnFileManager->CacheRawDataToDisk<float>(remote_files);
     auto local_files = diskAnnFileManager->GetLocalFilePaths();
 
     for (auto file : local_files) {
