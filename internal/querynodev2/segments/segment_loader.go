@@ -1653,6 +1653,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			return nil, err
 		}
 		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
+		log.Info("binlogSize", zap.Int64("memorySize", binlogSize))
 		shouldCalculateDataSize := false
 
 		if fieldIndexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
@@ -1671,6 +1672,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 
 			indexMemorySize += estimateResult.MaxMemoryCost
 			segmentDiskSize += estimateResult.MaxDiskCost
+			log.Info("estimateResult", zap.Int64("MaxMemoryCost", estimateResult.MaxMemoryCost), zap.Int64("indexMemorySize", indexMemorySize), zap.Int64("segmentMemorySize", segmentMemorySize))
 			if !estimateResult.HasRawData {
 				shouldCalculateDataSize = true
 			}
@@ -1694,6 +1696,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			interimIndexEnable := multiplyFactor.enableTempSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
 			if interimIndexEnable {
 				segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
+				log.Info("interimIndexEnable", zap.Int64("indexMemorySize", segmentMemorySize))
 			}
 		}
 
