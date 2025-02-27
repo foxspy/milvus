@@ -744,3 +744,75 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
         return formatter<string_view>::format(name, ctx);
     }
 };
+
+template <>
+struct fmt::formatter<milvus::proto::schema::DataType>
+    : formatter<string_view> {
+    auto
+    format(milvus::proto::schema::DataType c, format_context& ctx) const {
+        string_view name = "Unknown";
+        switch (c) {
+            case milvus::proto::schema::DataType::None:
+                name = "None";
+                break;
+            case milvus::proto::schema::DataType::Bool:
+                name = "Bool";
+                break;
+            case milvus::proto::schema::DataType::Int8:
+                name = "Int8";
+                break;
+            case milvus::proto::schema::DataType::Int16:
+                name = "Int16";
+                break;
+            case milvus::proto::schema::DataType::Int32:
+                name = "Int32";
+                break;
+            case milvus::proto::schema::DataType::Int64:
+                name = "Int64";
+                break;
+            case milvus::proto::schema::DataType::Float:
+                name = "Float";
+                break;
+            case milvus::proto::schema::DataType::Double:
+                name = "Double";
+                break;
+            case milvus::proto::schema::DataType::String:
+                name = "String";
+                break;
+            case milvus::proto::schema::DataType::VarChar:
+                name = "VarChar";
+                break;
+            case milvus::proto::schema::DataType::Array:
+                name = "Array";
+                break;
+            case milvus::proto::schema::DataType::JSON:
+                name = "JSON";
+                break;
+            case milvus::proto::schema::DataType::Geometry:
+                name = "Geometry";
+                break;
+            case milvus::proto::schema::DataType::Text:
+                name = "Text";
+                break;
+            case milvus::proto::schema::DataType::BinaryVector:
+                name = "BinaryVector";
+                break;
+            case milvus::proto::schema::DataType::FloatVector:
+                name = "FloatVector";
+                break;
+            case milvus::proto::schema::DataType::Float16Vector:
+                name = "Float16Vector";
+                break;
+            case milvus::proto::schema::DataType::BFloat16Vector:
+                name = "BFloat16Vector";
+                break;
+            case milvus::proto::schema::DataType::SparseFloatVector:
+                name = "SparseFloatVector";
+                break;
+            case milvus::proto::schema::DataType::Int8Vector:
+                name = "Int8Vector";
+                break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};

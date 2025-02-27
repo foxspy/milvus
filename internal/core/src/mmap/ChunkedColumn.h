@@ -202,38 +202,6 @@ class ChunkedColumnBase : public ColumnBase {
     std::vector<int64_t> num_rows_until_chunk_;
 
  private:
-    // void
-    // UpdateMetricWhenMmap(size_t mmaped_size) {
-    //     UpdateMetricWhenMmap(mapping_type_, mmaped_size);
-    // }
-
-    // void
-    // UpdateMetricWhenMmap(bool is_map_anonymous, size_t mapped_size) {
-    //     if (mapping_type_ == MappingType::MAP_WITH_ANONYMOUS) {
-    //         milvus::monitor::internal_mmap_allocated_space_bytes_anon.Observe(
-    //             mapped_size);
-    //         milvus::monitor::internal_mmap_in_used_space_bytes_anon.Increment(
-    //             mapped_size);
-    //     } else {
-    //         milvus::monitor::internal_mmap_allocated_space_bytes_file.Observe(
-    //             mapped_size);
-    //         milvus::monitor::internal_mmap_in_used_space_bytes_file.Increment(
-    //             mapped_size);
-    //     }
-    // }
-
-    // void
-    // UpdateMetricWhenMunmap(size_t mapped_size) {
-    //     if (mapping_type_ == MappingType::MAP_WITH_ANONYMOUS) {
-    //         milvus::monitor::internal_mmap_in_used_space_bytes_anon.Decrement(
-    //             mapped_size);
-    //     } else {
-    //         milvus::monitor::internal_mmap_in_used_space_bytes_file.Decrement(
-    //             mapped_size);
-    //     }
-    // }
-
- private:
     storage::MmapChunkManagerPtr mcm_ = nullptr;
 
  protected:
