@@ -37,6 +37,7 @@ if (USE_OPENDAL)
     add_definitions(-DUSE_OPENDAL)
 endif()
 
+
 project(core)
 include(CheckCXXCompilerFlag)
 if ( APPLE )
