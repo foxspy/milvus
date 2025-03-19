@@ -332,9 +332,9 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         bool use_mmap = false;
         if (!info.enable_mmap ||
             SystemProperty::Instance().IsSystem(field_id)) {
-            LoadFieldData(field_id, field_data_info);
+            LoadFieldDataInternal(field_id, field_data_info);
         } else {
-            MapFieldData(field_id, field_data_info);
+            MapFieldDataInternal(field_id, field_data_info);
             use_mmap = true;
         }
         LOG_INFO("segment {} loads field {} mmap {} done",
@@ -345,7 +345,8 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
 }
 
 void
-SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
+SegmentSealedImpl::LoadFieldDataInternal(FieldId field_id,
+                                         FieldDataInfo& data) {
     auto num_rows = data.row_count;
     if (SystemProperty::Instance().IsSystem(field_id)) {
         auto system_field_type =
@@ -515,7 +516,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             if (!is_sorted_by_pk_) {
                 AssertInfo(field_id.get() != -1, "Primary key is -1");
                 AssertInfo(insert_record_.empty_pks(), "already exists");
-                insert_record_.insert_pks(data_type, column);
+                insert_record_.insert_pks(data_type, column.get());
                 insert_record_.seal_pks();
             } else {
                 ASSERT_COLUMN_ORDERED(data_type, column);
@@ -548,7 +549,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
 }
 
 void
-SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
+SegmentSealedImpl::MapFieldDataInternal(const FieldId field_id,
+                                        FieldDataInfo& data) {
     auto filepath = std::filesystem::path(data.mmap_dir_path) / "raw_data" /
                     std::to_string(get_segment_id()) /
                     std::to_string(field_id.get());
@@ -653,7 +655,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     if (schema_->get_primary_field_id() == field_id && !is_sorted_by_pk_) {
         AssertInfo(field_id.get() != -1, "Primary key is -1");
         AssertInfo(insert_record_.empty_pks(), "already exists");
-        insert_record_.insert_pks(data_type, column);
+        insert_record_.insert_pks(data_type, column.get());
         insert_record_.seal_pks();
     }
 
@@ -987,15 +989,15 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
                 col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
         }
 
-        query::SearchOnSealed(*schema_,
-                              vec_data->Data(0),
-                              search_info,
-                              index_info,
-                              query_data,
-                              query_count,
-                              row_count,
-                              bitset,
-                              output);
+        query::SearchOnSealedData(*schema_,
+                                  vec_data->Data(0),
+                                  search_info,
+                                  index_info,
+                                  query_data,
+                                  query_count,
+                                  row_count,
+                                  bitset,
+                                  output);
         milvus::tracer::AddEvent("finish_searching_vector_data");
     }
 }

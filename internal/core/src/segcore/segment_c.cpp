@@ -55,15 +55,6 @@ NewSegment(CCollection collection,
             }
             case Sealed:
             case Indexing:
-                segment = milvus::segcore::CreateSealedSegment(
-                    col->get_schema(),
-                    col->get_index_meta(),
-                    segment_id,
-                    milvus::segcore::SegcoreConfig::default_config(),
-                    false,
-                    is_sorted_by_pk,
-                    false);
-                break;
             case ChunkedSealed:
                 segment = milvus::segcore::CreateSealedSegment(
                     col->get_schema(),
@@ -72,7 +63,7 @@ NewSegment(CCollection collection,
                     milvus::segcore::SegcoreConfig::default_config(),
                     false,
                     is_sorted_by_pk,
-                    true);
+                    seg_type == ChunkedSealed);
                 break;
 
             default:
@@ -357,8 +348,8 @@ LoadFieldRawData(CSegmentInterface c_segment,
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        auto segment =
-            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        auto segment = dynamic_cast<milvus::segcore::SegmentSealedImpl*>(
+            segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
         milvus::DataType data_type;
         int64_t dim = 1;
@@ -383,7 +374,8 @@ LoadFieldRawData(CSegmentInterface c_segment,
         channel->close();
         auto field_data_info = milvus::FieldDataInfo(
             field_id, static_cast<size_t>(row_count), channel);
-        segment->LoadFieldData(milvus::FieldId(field_id), field_data_info);
+        segment->LoadFieldDataInternal(milvus::FieldId(field_id),
+                                       field_data_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

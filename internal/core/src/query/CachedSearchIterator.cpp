@@ -131,7 +131,7 @@ CachedSearchIterator::CachedSearchIterator(
 }
 
 CachedSearchIterator::CachedSearchIterator(
-    const std::shared_ptr<ChunkedColumnBase>& column,
+    ChunkedColumnBase* column,
     const dataset::SearchDataset& query_ds,
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
@@ -153,7 +153,7 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [&column](int64_t chunk_id) {
+        [column](int64_t chunk_id) {
             const char* chunk_data = column->Data(chunk_id);
             int64_t chunk_size = column->chunk_row_nums(chunk_id);
             return std::make_pair(static_cast<const void*>(chunk_data),

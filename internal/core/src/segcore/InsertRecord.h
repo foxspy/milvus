@@ -493,13 +493,12 @@ struct InsertRecord {
     }
 
     void
-    insert_pks(milvus::DataType data_type,
-               const std::shared_ptr<ChunkedColumnBase>& data) {
+    insert_pks(milvus::DataType data_type, const ChunkedColumnBase* data) {
         std::lock_guard lck(shared_mutex_);
         int64_t offset = 0;
         switch (data_type) {
             case DataType::INT64: {
-                auto column = std::dynamic_pointer_cast<ChunkedColumn>(data);
+                auto column = dynamic_cast<const ChunkedColumn*>(data);
                 auto num_chunk = column->num_chunks();
                 for (int i = 0; i < num_chunk; ++i) {
                     auto pks =
@@ -512,8 +511,9 @@ struct InsertRecord {
                 break;
             }
             case DataType::VARCHAR: {
-                auto column = std::dynamic_pointer_cast<
-                    ChunkedVariableColumn<std::string>>(data);
+                auto column =
+                    dynamic_cast<const ChunkedVariableColumn<std::string>*>(
+                        data);
 
                 auto num_chunk = column->num_chunks();
                 for (int i = 0; i < num_chunk; ++i) {
@@ -533,14 +533,12 @@ struct InsertRecord {
     }
 
     void
-    insert_pks(milvus::DataType data_type,
-               const std::shared_ptr<SingleChunkColumnBase>& data) {
+    insert_pks(milvus::DataType data_type, const SingleChunkColumnBase* data) {
         std::lock_guard lck(shared_mutex_);
         int64_t offset = 0;
         switch (data_type) {
             case DataType::INT64: {
-                auto column =
-                    std::dynamic_pointer_cast<SingleChunkColumn>(data);
+                auto column = dynamic_cast<const SingleChunkColumn*>(data);
                 auto pks = reinterpret_cast<const int64_t*>(column->Data(0));
                 for (int i = 0; i < column->NumRows(); ++i) {
                     pk2offset_->insert(pks[i], offset++);
@@ -548,8 +546,9 @@ struct InsertRecord {
                 break;
             }
             case DataType::VARCHAR: {
-                auto column = std::dynamic_pointer_cast<
-                    SingleChunkVariableColumn<std::string>>(data);
+                auto column =
+                    dynamic_cast<const SingleChunkVariableColumn<std::string>*>(
+                        data);
                 auto pks = column->Views();
 
                 for (int i = 0; i < column->NumRows(); ++i) {

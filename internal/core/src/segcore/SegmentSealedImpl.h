@@ -71,10 +71,15 @@ class SegmentSealedImpl : public SegmentSealed {
         return insert_record_.contain(pk);
     }
 
+    // public only for testing
     void
-    LoadFieldData(FieldId field_id, FieldDataInfo& data) override;
+    LoadFieldDataInternal(FieldId field_id, FieldDataInfo& data);
+
+ private:
     void
-    MapFieldData(const FieldId field_id, FieldDataInfo& data) override;
+    MapFieldDataInternal(const FieldId field_id, FieldDataInfo& data);
+
+ public:
     void
     AddFieldDataInfoForSealed(
         const LoadFieldDataInfo& field_data_info) override;

@@ -22,6 +22,8 @@
 #include <utility>
 #include <vector>
 
+#include "folly/executors/InlineExecutor.h"
+
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
 #include "SealedIndexingRecord.h"
@@ -34,6 +36,12 @@
 #include "sys/mman.h"
 #include "common/Types.h"
 #include "common/IndexMeta.h"
+#include "futures/Executor.h"
+#include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/Translator.h"
+#include "cachinglayer/Utils.h"
+#include "segcore/storagev1translator/ChunkedColumnTranslator.h"
 
 namespace milvus::segcore {
 
@@ -69,10 +77,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return insert_record_.contain(pk);
     }
 
-    void
-    LoadFieldData(FieldId field_id, FieldDataInfo& data) override;
-    void
-    MapFieldData(const FieldId field_id, FieldDataInfo& data) override;
     void
     AddFieldDataInfoForSealed(
         const LoadFieldDataInfo& field_data_info) override;
@@ -135,11 +139,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     bool
     is_nullable(FieldId field_id) const override {
-        auto it = fields_.find(field_id);
-        AssertInfo(it != fields_.end(),
-                   "Cannot find field with field_id: " +
-                       std::to_string(field_id.get()));
-        return it->second->IsNullable();
+        auto& field_meta = schema_->operator[](field_id);
+        return field_meta.is_nullable();
     };
 
     bool
@@ -254,6 +255,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
  private:
+    void
+    LoadSystemFieldInternal(FieldId field_id, FieldDataInfo& data);
+
     template <typename S, typename T = S>
     static void
     bulk_subscript_impl(const void* src_raw,
@@ -356,6 +360,51 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     generate_interim_index(const FieldId field_id);
 
  private:
+    // This class is needed to hold a copy of the std::shared_ptr<CacheSlot>.
+    // See comment in impl of ChunkedSegmentSealedImpl::get_raw_data.
+    struct SingleCellAccessor {
+        SingleCellAccessor(
+            std::unique_ptr<milvus::cachinglayer::CellAccessor<
+                ChunkedColumnBase>> cell_accessor,
+            std::shared_ptr<milvus::cachinglayer::CacheSlot<ChunkedColumnBase>>
+                cache_slot)
+            : cell_accessor_(std::move(cell_accessor)),
+              cache_slot_(cache_slot) {
+        }
+
+        ChunkedColumnBase*
+        get_cell() {
+            return cell_accessor_->get_cell_of(0);
+        }
+
+     private:
+        std::unique_ptr<milvus::cachinglayer::CellAccessor<ChunkedColumnBase>>
+            cell_accessor_;
+        std::shared_ptr<milvus::cachinglayer::CacheSlot<ChunkedColumnBase>>
+            cache_slot_;
+    };
+
+    std::unique_ptr<SingleCellAccessor>
+    pin_column(FieldId field_id) const {
+        auto it = fields_.find(field_id);
+        if (it == fields_.end()) {
+            return nullptr;
+        }
+        static milvus::cachinglayer::uid_t uid = 0;
+        auto shared_slot = it->second;
+        // TODO: after the entire process is made async, we should avoid using
+        // inline executor and return a SemiFuture instead. Currently we can't use
+        // milvus::futures::getGlobalCPUExecutor() because this method may be
+        // called from thread in that executor, calling .get() here will block the
+        // thread. If all threads in that executor are blocked, the program will
+        // stuck.
+        auto cell_accessor = shared_slot->PinCells(&uid, 1)
+                                 .via(&folly::InlineExecutor::instance())
+                                 .get();
+        return std::make_unique<SingleCellAccessor>(std::move(cell_accessor),
+                                                    shared_slot);
+    }
+
     // mmap descriptor, used in chunk cache
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     // segment loading state
@@ -383,7 +432,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
-    std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnBase>> fields_;
+    mutable std::unordered_map<
+        FieldId,
+        std::shared_ptr<milvus::cachinglayer::CacheSlot<ChunkedColumnBase>>>
+        fields_;
     std::unordered_set<FieldId> mmap_fields_;
 
     // only useful in binlog

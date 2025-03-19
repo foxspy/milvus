@@ -110,15 +110,15 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     auto index_info = std::map<std::string, std::string>{};
     SearchResult search_result;
 
-    query::SearchOnSealed(*schema,
-                          column,
-                          search_info,
-                          index_info,
-                          query_data,
-                          1,
-                          total_row_count,
-                          bv,
-                          search_result);
+    query::SearchOnSealedColumn(*schema,
+                                column,
+                                search_info,
+                                index_info,
+                                query_data,
+                                1,
+                                total_row_count,
+                                bv,
+                                search_result);
 
     std::set<int64_t> offsets;
     for (auto& offset : search_result.seg_offsets_) {
@@ -135,15 +135,15 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     // test with group by
     search_info.group_by_field_id_ = fakevec_id;
     std::fill(bitset_data, bitset_data + bitset_size, 0);
-    query::SearchOnSealed(*schema,
-                          column,
-                          search_info,
-                          index_info,
-                          query_data,
-                          1,
-                          total_row_count,
-                          bv,
-                          search_result);
+    query::SearchOnSealedColumn(*schema,
+                                column,
+                                search_info,
+                                index_info,
+                                query_data,
+                                1,
+                                total_row_count,
+                                bv,
+                                search_result);
 
     ASSERT_EQ(1, search_result.vector_iterators_->size());
 
