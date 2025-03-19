@@ -21,6 +21,7 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
   if test -f "$LIBJEMALLOC"; then
     #echo "Found $LIBJEMALLOC"
     export LD_PRELOAD="$LIBJEMALLOC"
+    export MALLOC_CONF=background_thread:true,prof:true
   else
     echo "WARN: Cannot find $LIBJEMALLOC"
   fi
@@ -34,16 +35,16 @@ echo "Starting datacoord..."
 nohup ./bin/milvus run datacoord  --run-with-subprocess  > /tmp/datacoord.log 2>&1 &
 
 echo "Starting datanode..."
-nohup ./bin/milvus run datanode  --run-with-subprocess > /tmp/datanode.log 2>&1 &
+nohup ./bin/milvus run datanode --run-with-subprocess >/tmp/datanode.log 2>&1 &
 
 echo "Starting proxy..."
-nohup ./bin/milvus run proxy  --run-with-subprocess  > /tmp/proxy.log 2>&1 &
+nohup ./bin/milvus run proxy --run-with-subprocess >/tmp/proxy.log 2>&1 &
 
 echo "Starting querycoord..."
 nohup ./bin/milvus run querycoord  --run-with-subprocess > /tmp/querycoord.log 2>&1 &
 
 echo "Starting querynode..."
-nohup ./bin/milvus run querynode  --run-with-subprocess > /tmp/querynode.log 2>&1 &
+nohup ./bin/milvus run querynode --run-with-subprocess >/tmp/querynode.log 2>&1 &
 
 echo "Starting indexcoord..."
 nohup ./bin/milvus run indexcoord  --run-with-subprocess  > /tmp/indexcoord.log 2>&1 &
