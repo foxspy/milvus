@@ -1864,7 +1864,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         auto vec_index = std::make_unique<index::VectorMemIndex<float>>(
             field_binlog_config->GetIndexType(),
             index_metric,
-            knowhere::Version::GetCurrentVersion().VersionNumber());
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            index::IndexConstructType::ConstructByBuild);
         auto num_chunk = vec_data->num_chunks();
         for (int i = 0; i < num_chunk; ++i) {
             auto dataset = knowhere::GenDataSet(

@@ -33,11 +33,21 @@
 
 namespace milvus::index {
 
+enum class IndexConstructType {
+    ConstructByBuild = 0,
+    ConstructByLoad = 1,
+};
+
 class VectorIndex : public IndexBase {
  public:
     explicit VectorIndex(const IndexType& index_type,
-                         const MetricType& metric_type)
-        : IndexBase(index_type), metric_type_(metric_type) {
+                         const MetricType& metric_type,
+                         const IndexVersion& index_version,
+                         const IndexConstructType& index_construct_type)
+        : IndexBase(index_type),
+          metric_type_(metric_type),
+          index_version_(index_version),
+          index_construct_type_(index_construct_type) {
     }
 
  public:
@@ -82,6 +92,16 @@ class VectorIndex : public IndexBase {
     IndexType
     GetIndexType() const {
         return index_type_;
+    }
+
+    IndexVersion
+    GetIndexVersion() const {
+        return index_version_;
+    }
+
+    bool
+    IsConstructByLoad() const {
+        return index_construct_type_ == IndexConstructType::ConstructByLoad;
     }
 
     MetricType
@@ -144,6 +164,8 @@ class VectorIndex : public IndexBase {
 
  private:
     MetricType metric_type_;
+    IndexVersion index_version_;
+    IndexConstructType index_construct_type_;
     int64_t dim_;
 };
 

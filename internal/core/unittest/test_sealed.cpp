@@ -1481,7 +1481,8 @@ TEST(Sealed, GetVectorFromChunkCache) {
     auto indexing = std::make_unique<index::VectorMemIndex<float>>(
         index_type,
         metric_type,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        index::IndexConstructType::ConstructByBuild);
     indexing->BuildWithDataset(ds, conf);
     auto segment_sealed = CreateSealedSegment(schema);
 
@@ -1589,7 +1590,8 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
     auto indexing = std::make_unique<index::VectorMemIndex<float>>(
         index_type,
         metric_type,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        index::IndexConstructType::ConstructByBuild);
     indexing->BuildWithDataset(ds, conf);
     auto segment_sealed = CreateSealedSegment(
         schema, nullptr, -1, SegcoreConfig::default_config(), true);
@@ -1689,7 +1691,8 @@ TEST(Sealed, WarmupChunkCache) {
     auto indexing = std::make_unique<index::VectorMemIndex<float>>(
         index_type,
         metric_type,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        index::IndexConstructType::ConstructByBuild);
     indexing->BuildWithDataset(ds, conf);
     auto segment_sealed = CreateSealedSegment(schema);
 

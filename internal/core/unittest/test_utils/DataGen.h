@@ -1225,7 +1225,8 @@ GenVecIndexing(int64_t N,
         index_type,
         knowhere::metric::L2,
         knowhere::Version::GetCurrentVersion().VersionNumber(),
-        file_manager_context);
+        file_manager_context,
+        milvus::index::IndexConstructType::ConstructByBuild);
     indexing->BuildWithDataset(database, conf);
     auto create_index_result = indexing->Upload();
     auto index_files = create_index_result->GetIndexFiles();

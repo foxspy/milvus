@@ -11,8 +11,7 @@ EvictionManager::EvictionManager(StorageType storage_type)
 }
 
 void
-EvictionManager::register_slot(uint64_t slot_id,
-                               size_t num_cells) {
+EvictionManager::register_slot(uint64_t slot_id, size_t num_cells) {
     std::unique_lock<std::mutex> lock(mutex_);
     for (size_t i = 0; i < num_cells; ++i) {
         key_size_[GlobalCellKey(slot_id, i)] = 0;
@@ -20,8 +19,7 @@ EvictionManager::register_slot(uint64_t slot_id,
 }
 
 void
-EvictionManager::unregister_slot(uint64_t slot_id,
-                                  size_t num_cells) {
+EvictionManager::unregister_slot(uint64_t slot_id, size_t num_cells) {
     std::unique_lock<std::mutex> lock(mutex_);
     for (size_t i = 0; i < num_cells; ++i) {
         key_size_.erase(GlobalCellKey(slot_id, i));

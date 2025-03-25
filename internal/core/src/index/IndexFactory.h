@@ -76,11 +76,13 @@ class IndexFactory {
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,
-                const storage::FileManagerContext& file_manager_context);
+                const storage::FileManagerContext& file_manager_context,
+                const IndexConstructType& index_construct_type);
 
     IndexBasePtr
     CreateVectorIndex(const CreateIndexInfo& create_index_info,
-                      const storage::FileManagerContext& file_manager_context);
+                      const storage::FileManagerContext& file_manager_context,
+                      const IndexConstructType& index_construct_type);
 
     // For base types like int, float, double, string, etc
     IndexBasePtr

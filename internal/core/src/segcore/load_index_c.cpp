@@ -162,7 +162,9 @@ appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
 
         load_index_info->index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
-                index_info, fileManagerContext);
+                index_info,
+                fileManagerContext,
+                milvus::index::IndexConstructType::ConstructByLoad);
         load_index_info->index->Load(*binary_set, config);
         auto status = CStatus();
         status.error_code = milvus::Success;
@@ -195,7 +197,9 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
 
         load_index_info->index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
-                index_info, milvus::storage::FileManagerContext());
+                index_info,
+                milvus::storage::FileManagerContext(),
+                milvus::index::IndexConstructType::ConstructByLoad);
         load_index_info->index->Load(*binary_set);
         auto status = CStatus();
         status.error_code = milvus::Success;
@@ -317,7 +321,9 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
 
         load_index_info->index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
-                index_info, fileManagerContext);
+                index_info,
+                fileManagerContext,
+                milvus::index::IndexConstructType::ConstructByLoad);
 
         if (load_index_info->enable_mmap &&
             load_index_info->index->IsMmapSupported()) {

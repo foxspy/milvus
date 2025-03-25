@@ -2000,7 +2000,8 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
             std::make_unique<index::VectorMemIndex<float>>(
                 field_binlog_config->GetIndexType(),
                 index_metric,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                index::IndexConstructType::ConstructByBuild);
         vec_index->BuildWithDataset(dataset, build_config);
         if (enable_binlog_index()) {
             std::unique_lock lck(mutex_);

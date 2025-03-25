@@ -306,9 +306,11 @@ IndexFactory::ScalarIndexLoadResource(
 IndexBasePtr
 IndexFactory::CreateIndex(
     const CreateIndexInfo& create_index_info,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    const IndexConstructType& index_construct_type) {
     if (IsVectorDataType(create_index_info.field_type)) {
-        return CreateVectorIndex(create_index_info, file_manager_context);
+        return CreateVectorIndex(
+            create_index_info, file_manager_context, index_construct_type);
     }
 
     return CreateScalarIndex(create_index_info, file_manager_context);
@@ -455,7 +457,8 @@ IndexFactory::CreateScalarIndex(
 IndexBasePtr
 IndexFactory::CreateVectorIndex(
     const CreateIndexInfo& create_index_info,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    const IndexConstructType& index_construct_type) {
     auto index_type = create_index_info.index_type;
     auto metric_type = create_index_info.metric_type;
     auto version = create_index_info.index_engine_version;
@@ -465,23 +468,43 @@ IndexFactory::CreateVectorIndex(
         switch (data_type) {
             case DataType::VECTOR_FLOAT: {
                 return std::make_unique<VectorDiskAnnIndex<float>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    index_construct_type,
+                    file_manager_context);
             }
             case DataType::VECTOR_FLOAT16: {
                 return std::make_unique<VectorDiskAnnIndex<float16>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    index_construct_type,
+                    file_manager_context);
             }
             case DataType::VECTOR_BFLOAT16: {
                 return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    index_construct_type,
+                    file_manager_context);
             }
             case DataType::VECTOR_BINARY: {
                 return std::make_unique<VectorDiskAnnIndex<bin1>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    index_construct_type,
+                    file_manager_context);
             }
             case DataType::VECTOR_SPARSE_FLOAT: {
                 return std::make_unique<VectorDiskAnnIndex<float>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    index_construct_type,
+                    file_manager_context);
             }
             case DataType::VECTOR_INT8: {
                 // TODO caiyd, not support yet
@@ -497,23 +520,43 @@ IndexFactory::CreateVectorIndex(
             case DataType::VECTOR_FLOAT:
             case DataType::VECTOR_SPARSE_FLOAT: {
                 return std::make_unique<VectorMemIndex<float>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    index_construct_type,
+                    file_manager_context);
             }
             case DataType::VECTOR_BINARY: {
                 return std::make_unique<VectorMemIndex<bin1>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    index_construct_type,
+                    file_manager_context);
             }
             case DataType::VECTOR_FLOAT16: {
                 return std::make_unique<VectorMemIndex<float16>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    index_construct_type,
+                    file_manager_context);
             }
             case DataType::VECTOR_BFLOAT16: {
                 return std::make_unique<VectorMemIndex<bfloat16>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    index_construct_type,
+                    file_manager_context);
             }
             case DataType::VECTOR_INT8: {
                 return std::make_unique<VectorMemIndex<int8>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    index_construct_type,
+                    file_manager_context);
             }
             default:
                 PanicInfo(

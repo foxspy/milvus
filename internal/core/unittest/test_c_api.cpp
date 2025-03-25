@@ -1894,7 +1894,8 @@ TEST(CApiTest, LoadIndexSearch) {
     load_index_info.index = std::make_unique<VectorMemIndex<float>>(
         index_params["index_type"],
         knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        milvus::index::IndexConstructType::ConstructByLoad);
     load_index_info.index->Load(binary_set);
 
     // search

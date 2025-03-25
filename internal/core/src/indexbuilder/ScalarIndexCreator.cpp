@@ -48,7 +48,9 @@ ScalarIndexCreator::ScalarIndexCreator(
         index_info.json_path = config.at(JSON_PATH).get<std::string>();
     }
     index_ = index::IndexFactory::GetInstance().CreateIndex(
-        index_info, file_manager_context);
+        index_info,
+        file_manager_context,
+        index::IndexConstructType::ConstructByBuild);
 }
 
 void

@@ -46,7 +46,8 @@ VectorFieldIndexing::recreate_index() {
     index_ = std::make_unique<index::VectorMemIndex<float>>(
         config_->GetIndexType(),
         config_->GetMetricType(),
-        knowhere::Version::GetCurrentVersion().VersionNumber());
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        index::IndexConstructType::ConstructByBuild);
 }
 
 void
@@ -69,7 +70,8 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
         auto indexing = std::make_unique<index::VectorMemIndex<float>>(
             knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
             knowhere::metric::L2,
-            knowhere::Version::GetCurrentVersion().VersionNumber());
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            index::IndexConstructType::ConstructByBuild);
         auto dataset =
             knowhere::GenDataSet(source->get_size_per_chunk(), dim, chunk_data);
         indexing->BuildWithDataset(dataset, conf);

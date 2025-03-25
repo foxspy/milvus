@@ -31,6 +31,7 @@ class VectorDiskAnnIndex : public VectorIndex {
         const IndexType& index_type,
         const MetricType& metric_type,
         const IndexVersion& version,
+        const IndexConstructType& index_construct_type,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 

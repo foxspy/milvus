@@ -40,8 +40,9 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     const IndexType& index_type,
     const MetricType& metric_type,
     const IndexVersion& version,
+    const IndexConstructType& index_construct_type,
     const storage::FileManagerContext& file_manager_context)
-    : VectorIndex(index_type, metric_type) {
+    : VectorIndex(index_type, metric_type, version, index_construct_type) {
     CheckMetricTypeSupport<T>(metric_type);
     file_manager_ =
         std::make_shared<storage::DiskFileManagerImpl>(file_manager_context);

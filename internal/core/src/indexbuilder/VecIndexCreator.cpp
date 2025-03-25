@@ -44,7 +44,9 @@ VecIndexCreator::VecIndexCreator(
     index_info.dim = dim;
 
     index_ = index::IndexFactory::GetInstance().CreateIndex(
-        index_info, file_manager_context);
+        index_info,
+        file_manager_context,
+        index::IndexConstructType::ConstructByBuild);
     AssertInfo(index_ != nullptr,
                "[VecIndexCreator]Index is null after create index");
 }

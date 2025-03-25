@@ -26,17 +26,14 @@ namespace milvus::cachinglayer {
 // when resource usage is at high waterlevel(e.g. 90%) and purge to a lower waterlevel(e.g. 80%).
 class EvictionManager {
  public:
-
     EvictionManager(StorageType storage_type);
 
     void
     register_slot(uint64_t slot_id, size_t num_cells);
     void
-    unregister_slot(uint64_t slot_id,
-                    size_t num_cells);
+    unregister_slot(uint64_t slot_id, size_t num_cells);
     void
-    notify_cell_inserted(const GlobalCellKey& key,
-                         size_t cell_size);
+    notify_cell_inserted(const GlobalCellKey& key, size_t cell_size);
     void
     notify_cell_pinned(const GlobalCellKey& key);
     void
