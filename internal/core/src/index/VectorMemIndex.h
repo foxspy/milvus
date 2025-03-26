@@ -158,7 +158,7 @@ class VectorMemIndex : public VectorIndex {
     }
 
     Config config_;
-    const static milvus::cachinglayer::uid_t uid = 0;
+    static inline milvus::cachinglayer::uid_t uid = 0;
     // TODO: split vector index into buildable and non-buildable
     knowhere::Index<knowhere::IndexNode> building_index_;
     mutable std::shared_ptr<
