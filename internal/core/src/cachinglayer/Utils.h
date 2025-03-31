@@ -27,39 +27,4 @@ enum class StorageType {
     COUNT,
 };
 
-class GlobalCellKey {
- public:
-    GlobalCellKey(uint64_t slot_id, cid_t cid) : slot_id_(slot_id), cid_(cid) {
-    }
-
-    bool
-    operator==(const GlobalCellKey& other) const {
-        return slot_id_ == other.slot_id_ && cid_ == other.cid_;
-    }
-
-    uint64_t
-    get_slot_id() const {
-        return slot_id_;
-    }
-    cid_t
-    get_cid() const {
-        return cid_;
-    }
-
- private:
-    uint64_t slot_id_;
-    cid_t cid_;
-};
-
 }  // namespace milvus::cachinglayer
-
-namespace std {
-template <>
-struct hash<milvus::cachinglayer::GlobalCellKey> {
-    size_t
-    operator()(const milvus::cachinglayer::GlobalCellKey& key) const {
-        return hash<uint64_t>()(key.get_slot_id()) ^
-               hash<milvus::cachinglayer::cid_t>()(key.get_cid());
-    }
-};
-}  // namespace std

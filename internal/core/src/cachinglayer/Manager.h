@@ -24,6 +24,7 @@ namespace milvus::cachinglayer {
 // TODO: add config system, include config for the overall caching layer, and for individual cache slots.
 class Manager {
  public:
+    // TODO: configs
     static Manager&
     GetInstance();
 

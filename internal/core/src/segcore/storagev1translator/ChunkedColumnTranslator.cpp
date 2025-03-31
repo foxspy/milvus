@@ -29,7 +29,8 @@ ChunkedColumnTranslator::ChunkedColumnTranslator(
       field_meta_(field_meta),
       field_data_info_(field_data_info),
       insert_files_(insert_files),
-      storage_type_(storage_type) {
+      storage_type_(storage_type),
+      estimated_byte_size_of_cell_(0) {
     AssertInfo(!SystemProperty::Instance().IsSystem(
                    FieldId(field_data_info_.field_id)),
                "ChunkedColumnTranslator not supported for system field");
@@ -50,6 +51,12 @@ ChunkedColumnTranslator::storage_type() const {
     return storage_type_;
 }
 
+size_t
+ChunkedColumnTranslator::estimated_byte_size_of_cell(
+    milvus::cachinglayer::cid_t cid) const {
+    return estimated_byte_size_of_cell_;
+}
+
 const std::string&
 ChunkedColumnTranslator::key() const {
     return key_;
@@ -63,6 +70,7 @@ ChunkedColumnTranslator::get_cells(
                "ChunkedColumnTranslator only supports single cell");
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    // TODO: storagev2 should use executor to perform download.
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     pool.Submit(LoadArrowReaderFromRemote,
                 insert_files_,
@@ -74,6 +82,7 @@ ChunkedColumnTranslator::get_cells(
     auto column = storage_type_ == milvus::cachinglayer::StorageType::MEMORY
                       ? load_column_in_memory()
                       : load_column_in_mmap();
+    estimated_byte_size_of_cell_ = column->DataByteSize();
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<milvus::ChunkedColumnBase>>>
         cells;

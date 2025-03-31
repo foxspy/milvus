@@ -17,7 +17,7 @@ Manager::GetInstance() {
 Manager::Manager() {
     for (int i = 0; i < static_cast<int>(StorageType::COUNT); ++i) {
         eviction_managers_[i] =
-            std::make_unique<EvictionManager>(static_cast<StorageType>(i));
+            std::make_unique<EvictionManager>(static_cast<StorageType>(i), std::numeric_limits<size_t>::max());
     }
 }
 

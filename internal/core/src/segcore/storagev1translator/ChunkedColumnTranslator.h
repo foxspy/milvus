@@ -25,6 +25,8 @@ class ChunkedColumnTranslator
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
     milvus::cachinglayer::StorageType
     storage_type() const override;
+    size_t
+    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
     const std::string&
     key() const override;
     // each calling of this will trigger a new download.
@@ -46,6 +48,7 @@ class ChunkedColumnTranslator
     FieldDataInfo field_data_info_;
     std::vector<std::string> insert_files_;
     milvus::cachinglayer::StorageType storage_type_;
+    mutable size_t estimated_byte_size_of_cell_;
 };
 
 }  // namespace milvus::segcore::storagev1translator

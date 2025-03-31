@@ -31,11 +31,20 @@ class Translator {
     cell_id_of(uid_t uid) const = 0;
     virtual StorageType
     storage_type() const = 0;
-    // to identify a CacheSlot.
+    // For resource reservation when a cell is about to be loaded.
+    // If a cell is about to be pinned and loaded, and there are not enough resource for it, EvictionManager
+    // will try to evict some other cells to make space. Thus this estimation should generally be greater
+    // than or equal to the actual size. If the estimation is smaller than the actual size, with insufficient
+    // resource reserved, the load may fail.
+    virtual size_t
+    estimated_byte_size_of_cell(cid_t cid) const = 0;
+    // must be unique to identify a CacheSlot.
     virtual const std::string&
     key() const = 0;
 
     // Translator may choose to fetch more than requested cells.
+    // TODO: This has a problem: when loading, the resource manager will only reserve the size of the requested cells,
+    // How can translator be sure the extra cells can fit?
     virtual std::vector<std::pair<cid_t, std::unique_ptr<CellT>>>
     get_cells(const std::vector<cid_t>& cids) const = 0;
     virtual ~Translator() = default;
