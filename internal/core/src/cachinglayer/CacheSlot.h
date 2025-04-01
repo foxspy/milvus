@@ -148,7 +148,8 @@ class CacheSlot final {
             try {
                 auto results = translator_->get_cells(copy_load_queue);
                 for (auto& result : results) {
-                    cells_[result.first].set_cell(std::move(result.second), bitset[result.first]);
+                    cells_[result.first].set_cell(std::move(result.second),
+                                                  bitset[result.first]);
                 }
                 batch_load_promise_ptr->setValue(folly::Unit());
             } catch (std::exception& e) {
@@ -194,10 +195,11 @@ class CacheSlot final {
         set_cell(std::unique_ptr<CellT> cell, bool requesting_thread) {
             // translator may return more than requested, thus we need insert those
             // extra cells into the dlist and mark them as LOADED.
-            auto shared_cell = std::make_shared<std::unique_ptr<CellT>>(std::move(cell));
-            mark_loaded([this, shared_cell]() {
-                cell_ = std::move(*shared_cell);
-            }, requesting_thread);
+            auto shared_cell =
+                std::make_shared<std::unique_ptr<CellT>>(std::move(cell));
+            mark_loaded(
+                [this, shared_cell]() { cell_ = std::move(*shared_cell); },
+                requesting_thread);
         }
 
      protected:

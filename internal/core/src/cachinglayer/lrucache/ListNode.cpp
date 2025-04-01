@@ -61,10 +61,9 @@ ListNode::pin() {
     return folly::makeSemiFuture().deferValue([this](auto&&) {
         // must be called with lock acquired, and state must not be NOT_LOADED.
         auto read_op = [this]() -> folly::SemiFuture<Pin> {
-            AssertInfo(
-                state_ != State::NOT_LOADED,
-                "Programming error: read_op called on a {} cell",
-                state_to_string(state_));
+            AssertInfo(state_ != State::NOT_LOADED,
+                       "Programming error: read_op called on a {} cell",
+                       state_to_string(state_));
             if (state_ == State::ERROR) {
                 return folly::makeSemiFuture<ListNode::Pin>(error_);
             }
@@ -104,9 +103,8 @@ ListNode::pin() {
         }
 
         return load()
-            .deferValue([this](auto&&) {
-                return folly::makeSemiFuture<Pin>(this);
-            })
+            .deferValue(
+                [this](auto&&) { return folly::makeSemiFuture<Pin>(this); })
             .deferError([this](folly::exception_wrapper&& e) {
                 dlist_->releaseMemoryWhenLoadFailed(size());
                 std::unique_lock<std::shared_mutex> lock(mtx_);
@@ -126,10 +124,14 @@ ListNode::pin() {
 std::string
 ListNode::state_to_string(State state) {
     switch (state) {
-        case State::NOT_LOADED: return "NOT_LOADED";
-        case State::LOADING: return "LOADING";
-        case State::LOADED: return "LOADED";
-        case State::ERROR: return "ERROR";
+        case State::NOT_LOADED:
+            return "NOT_LOADED";
+        case State::LOADING:
+            return "LOADING";
+        case State::LOADED:
+            return "LOADED";
+        case State::ERROR:
+            return "ERROR";
     }
     throw std::invalid_argument("Invalid state");
 }
@@ -162,7 +164,7 @@ ListNode::mark_loaded(std::function<void()>&& cb, bool requesting_thread) {
     std::unique_lock<std::shared_mutex> lock(mtx_);
     if (requesting_thread) {
         // requesting thread will promote NOT_LOADED to LOADING and only requesting
-        // thread will set state to ERROR, thus it is not possible for the requesting 
+        // thread will set state to ERROR, thus it is not possible for the requesting
         // thread to see NOT_LOADED or ERROR.
         AssertInfo(state_ != State::NOT_LOADED && state_ != State::ERROR,
                    "Programming error: mark_loaded(requesting_thread=true) "

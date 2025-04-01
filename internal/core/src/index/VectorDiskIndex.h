@@ -21,6 +21,7 @@
 
 #include "index/VectorIndex.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "cachinglayer/CacheSlot.h"
 
 namespace milvus::index {
 
@@ -37,7 +38,7 @@ class VectorDiskAnnIndex : public VectorIndex {
     BinarySet
     Serialize(const Config& config) override {  // deprecated
         BinarySet binary_set;
-        index_.Serialize(binary_set);
+        GetAccessor()->Get()->Serialize(binary_set);
         auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
         for (auto& file : remote_paths_to_size) {
             binary_set.Append(file.first, nullptr, file.second);
@@ -51,7 +52,7 @@ class VectorDiskAnnIndex : public VectorIndex {
 
     int64_t
     Count() override {
-        return index_.Count();
+        return GetAccessor()->Get()->Count();
     }
 
     void
@@ -93,12 +94,90 @@ class VectorDiskAnnIndex : public VectorIndex {
                     const knowhere::Json& json,
                     const BitsetView& bitset) const override;
 
+ protected:
+ protected:
+    struct SingleCellAccessor {
+        SingleCellAccessor(
+            std::unique_ptr<milvus::cachinglayer::CellAccessor<
+                knowhere::Index<knowhere::IndexNode>>> cell_accessor,
+            std::shared_ptr<milvus::cachinglayer::CacheSlot<
+                knowhere::Index<knowhere::IndexNode>>> cache_slot)
+            : index_(nullptr),
+              cell_accessor_(std::move(cell_accessor)),
+              cache_slot_(std::move(cache_slot)) {
+        }
+
+        explicit SingleCellAccessor(knowhere::Index<knowhere::IndexNode>* index)
+            : index_(index), cell_accessor_(nullptr), cache_slot_(nullptr) {
+        }
+
+        knowhere::Index<knowhere::IndexNode>*
+        Get() {
+            if (cell_accessor_ != nullptr) {
+                return const_cast<knowhere::Index<knowhere::IndexNode>*>(
+                    cell_accessor_->get_cell_of(0));
+            }
+            return index_;
+        }
+
+        const knowhere::Index<knowhere::IndexNode>*
+        Get() const {
+            if (cell_accessor_ != nullptr) {
+                return cell_accessor_->get_cell_of(0);
+            }
+            return index_;
+        }
+
+     private:
+        knowhere::Index<knowhere::IndexNode>* index_;
+        std::unique_ptr<milvus::cachinglayer::CellAccessor<
+            knowhere::Index<knowhere::IndexNode>>>
+            cell_accessor_;
+        std::shared_ptr<milvus::cachinglayer::CacheSlot<
+            knowhere::Index<knowhere::IndexNode>>>
+            cache_slot_;
+    };
+
+    std::unique_ptr<SingleCellAccessor>
+    GetAccessor() const {
+        // Try to get cached index first, if not found, use building_index_
+        if (cache_managed_index_ != nullptr) {
+            return std::make_unique<SingleCellAccessor>(
+                cache_managed_index_->PinCells(&uid, 1).get(),
+                cache_managed_index_);
+        }
+        return std::make_unique<SingleCellAccessor>(
+            const_cast<knowhere::Index<knowhere::IndexNode>*>(
+                &building_index_));
+    }
+
+    std::unique_ptr<SingleCellAccessor>
+    GetAccessor() {
+        // Try to get cached index first, if found, index must be loaded with file manager
+        // Otherwise, use building_index_ for growing index or index building task
+        if (cache_managed_index_ != nullptr) {
+            return std::make_unique<SingleCellAccessor>(
+                cache_managed_index_->PinCells(&uid, 1).get(),
+                cache_managed_index_);
+        }
+        return std::make_unique<SingleCellAccessor>(&building_index_);
+    }
+
  private:
     knowhere::Json
     update_load_json(const Config& config);
 
  private:
-    knowhere::Index<knowhere::IndexNode> index_;
+    knowhere::Index<knowhere::IndexNode> building_index_;
+    static inline milvus::cachinglayer::uid_t uid = 0;
+
+    mutable std::shared_ptr<
+        milvus::cachinglayer::CacheSlot<knowhere::Index<knowhere::IndexNode>>>
+        cache_managed_index_;
+
+    int64_t segment_id_;
+    int64_t field_id_;
+
     std::shared_ptr<storage::DiskFileManagerImpl> file_manager_;
     uint32_t search_beamwidth_ = 8;
 };

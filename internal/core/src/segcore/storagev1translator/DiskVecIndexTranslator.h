@@ -11,55 +11,69 @@
 
 #pragma once
 
-#include <string>
-#include <vector>
-
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/Types.h"
-#include "mmap/ChunkedColumn.h"
+#include "common/FieldMeta.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/index/index.h"
+#include "storage/DiskFileManagerImpl.h"
 
 namespace milvus::segcore::storagev1translator {
 
-class ChunkedColumnTranslator
-    : public milvus::cachinglayer::Translator<milvus::ChunkedColumnBase> {
+template <typename T>
+class DiskVecIndexTranslator : public milvus::cachinglayer::Translator<
+                                   knowhere::Index<knowhere::IndexNode>> {
  public:
-    ChunkedColumnTranslator(int64_t segment_id,
-                            FieldMeta field_meta,
-                            FieldDataInfo field_data_info,
-                            std::vector<std::string> insert_files,
-                            milvus::cachinglayer::StorageType storage_type);
+    DiskVecIndexTranslator(
+        int64_t segment_id,
+        int64_t field_id,
+        knowhere::IndexType index_type,
+        knowhere::IndexVersion index_version,
+        Config config,
+        std::shared_ptr<storage::DiskFileManagerImpl> file_manager);
+
+ private:
+    size_t
+    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
 
     size_t
     num_cells() const override;
+
     milvus::cachinglayer::cid_t
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
+
     milvus::cachinglayer::StorageType
     storage_type() const override;
-    size_t
-    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+
     const std::string&
     key() const override;
-    // each calling of this will trigger a new download.
-    std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::ChunkedColumnBase>>>
+
+    std::vector<
+        std::pair<milvus::cachinglayer::cid_t,
+                  std::unique_ptr<knowhere::Index<knowhere::IndexNode>>>>
     get_cells(
         const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
 
  private:
-    std::unique_ptr<milvus::ChunkedColumnBase>
-    load_column_in_memory() const;
+    std::unique_ptr<knowhere::Index<knowhere::IndexNode>>
+    load_index_into_file() const;
 
-    std::unique_ptr<milvus::ChunkedColumnBase>
-    load_column_in_mmap() const;
+    knowhere::Json
+    update_load_json() const;
 
     int64_t segment_id_;
+    int64_t field_id_;
     std::string key_;
-    FieldMeta field_meta_;
-    FieldDataInfo field_data_info_;
-    std::vector<std::string> insert_files_;
+
+    knowhere::IndexType index_type_;
+    knowhere::IndexVersion index_version_;
+
+    Config config_;
     milvus::cachinglayer::StorageType storage_type_;
-    mutable size_t estimated_byte_size_of_cell_;
+
+    std::shared_ptr<storage::DiskFileManagerImpl> file_manager_;
 };
 
 }  // namespace milvus::segcore::storagev1translator

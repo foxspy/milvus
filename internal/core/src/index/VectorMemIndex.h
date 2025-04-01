@@ -26,6 +26,7 @@
 #include "index/VectorIndex.h"
 #include "storage/MemFileManagerImpl.h"
 #include "index/IndexInfo.h"
+#include "cachinglayer/CacheSlot.h"
 
 namespace milvus::index {
 
@@ -60,7 +61,7 @@ class VectorMemIndex : public VectorIndex {
 
     int64_t
     Count() override {
-        return index_.Count();
+        return GetAccessor()->Get()->Count();
     }
 
     void
@@ -86,18 +87,89 @@ class VectorMemIndex : public VectorIndex {
                     const knowhere::Json& json,
                     const BitsetView& bitset) const override;
 
- protected:
-    virtual void
-    LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
-
  private:
     void
     LoadFromFile(const Config& config);
 
  protected:
+    struct SingleCellAccessor {
+        SingleCellAccessor(
+            std::unique_ptr<milvus::cachinglayer::CellAccessor<
+                knowhere::Index<knowhere::IndexNode>>> cell_accessor,
+            std::shared_ptr<milvus::cachinglayer::CacheSlot<
+                knowhere::Index<knowhere::IndexNode>>> cache_slot)
+            : index_(nullptr),
+              cell_accessor_(std::move(cell_accessor)),
+              cache_slot_(std::move(cache_slot)) {
+        }
+
+        explicit SingleCellAccessor(knowhere::Index<knowhere::IndexNode>* index)
+            : index_(index), cell_accessor_(nullptr), cache_slot_(nullptr) {
+        }
+
+        knowhere::Index<knowhere::IndexNode>*
+        Get() {
+            if (cell_accessor_ != nullptr) {
+                return const_cast<knowhere::Index<knowhere::IndexNode>*>(
+                    cell_accessor_->get_cell_of(0));
+            }
+            return index_;
+        }
+
+        const knowhere::Index<knowhere::IndexNode>*
+        Get() const {
+            if (cell_accessor_ != nullptr) {
+                return cell_accessor_->get_cell_of(0);
+            }
+            return index_;
+        }
+
+     private:
+        knowhere::Index<knowhere::IndexNode>* index_;
+        std::unique_ptr<milvus::cachinglayer::CellAccessor<
+            knowhere::Index<knowhere::IndexNode>>>
+            cell_accessor_;
+        std::shared_ptr<milvus::cachinglayer::CacheSlot<
+            knowhere::Index<knowhere::IndexNode>>>
+            cache_slot_;
+    };
+
+    std::unique_ptr<SingleCellAccessor>
+    GetAccessor() const {
+        // Try to get cached index first, if not found, use building_index_
+        if (cache_managed_index_ != nullptr) {
+            return std::make_unique<SingleCellAccessor>(
+                cache_managed_index_->PinCells(&uid, 1).get(),
+                cache_managed_index_);
+        }
+        return std::make_unique<SingleCellAccessor>(
+            const_cast<knowhere::Index<knowhere::IndexNode>*>(
+                &building_index_));
+    }
+
+    std::unique_ptr<SingleCellAccessor>
+    GetAccessor() {
+        // Try to get cached index first, if found, index must be loaded with file manager
+        // Otherwise, use building_index_ for growing index or index building task
+        if (cache_managed_index_ != nullptr) {
+            return std::make_unique<SingleCellAccessor>(
+                cache_managed_index_->PinCells(&uid, 1).get(),
+                cache_managed_index_);
+        }
+        return std::make_unique<SingleCellAccessor>(&building_index_);
+    }
+
     Config config_;
-    knowhere::Index<knowhere::IndexNode> index_;
+    static inline milvus::cachinglayer::uid_t uid = 0;
+    // TODO: split vector index into buildable and non-buildable
+    knowhere::Index<knowhere::IndexNode> building_index_;
+    mutable std::shared_ptr<
+        milvus::cachinglayer::CacheSlot<knowhere::Index<knowhere::IndexNode>>>
+        cache_managed_index_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+
+    int64_t segment_id_;
+    int64_t field_id_;
 
     CreateIndexInfo create_index_info_;
 };

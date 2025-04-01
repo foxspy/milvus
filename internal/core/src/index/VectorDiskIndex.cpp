@@ -27,6 +27,8 @@
 #include "common/Consts.h"
 #include "common/RangeSearchHelper.h"
 #include "indexbuilder/types.h"
+#include "cachinglayer/Manager.h"
+#include "segcore/storagev1translator/DiskVecIndexTranslator.h"
 
 namespace milvus::index {
 
@@ -41,7 +43,7 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     const MetricType& metric_type,
     const IndexVersion& version,
     const storage::FileManagerContext& file_manager_context)
-    : VectorIndex(index_type, metric_type) {
+    : VectorIndex(index_type, metric_type, version) {
     CheckMetricTypeSupport<T>(metric_type);
     file_manager_ =
         std::make_shared<storage::DiskFileManagerImpl>(file_manager_context);
@@ -63,7 +65,7 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     auto get_index_obj = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
     if (get_index_obj.has_value()) {
-        index_ = get_index_obj.value();
+        building_index_ = get_index_obj.value();
     } else {
         auto err = get_index_obj.error();
         if (err == knowhere::Status::invalid_index_error) {
@@ -84,41 +86,27 @@ template <typename T>
 void
 VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
                             const Config& config) {
-    knowhere::Json load_config = update_load_json(config);
-
-    // start read file span with active scope
-    {
-        auto read_file_span =
-            milvus::tracer::StartSpan("SegCoreReadDiskIndexFile", &ctx);
-        auto read_scope =
-            milvus::tracer::GetTracer()->WithActiveSpan(read_file_span);
-        auto index_files =
-            GetValueFromConfig<std::vector<std::string>>(config, "index_files");
-        AssertInfo(index_files.has_value(),
-                   "index file paths is empty when load disk ann index data");
-        file_manager_->CacheIndexToDisk(index_files.value());
-        read_file_span->End();
-    }
-
-    // start engine load index span
-    auto span_load_engine =
-        milvus::tracer::StartSpan("SegCoreEngineLoadDiskIndex", &ctx);
-    auto engine_scope =
-        milvus::tracer::GetTracer()->WithActiveSpan(span_load_engine);
-    auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
-    if (stat != knowhere::Status::success)
-        PanicInfo(ErrorCode::UnexpectedError,
-                  "failed to Deserialize index, " + KnowhereStatusString(stat));
-    span_load_engine->End();
-
-    SetDim(index_.Dim());
+    std::unique_ptr<
+        milvus::cachinglayer::Translator<knowhere::Index<knowhere::IndexNode>>>
+        translator = std::make_unique<
+            segcore::storagev1translator::DiskVecIndexTranslator<T>>(
+            segment_id_,
+            field_id_,
+            GetIndexType(),
+            GetIndexVersion(),
+            config,
+            file_manager_);
+    cache_managed_index_ =
+        milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+            std::move(translator));
+    cache_managed_index_->PinCells(&uid, 1);
 }
 
 template <typename T>
 IndexStatsPtr
 VectorDiskAnnIndex<T>::Upload(const Config& config) {
     BinarySet ret;
-    auto stat = index_.Serialize(ret);
+    auto stat = GetAccessor()->Get()->Serialize(ret);
     if (stat != knowhere::Status::success) {
         PanicInfo(ErrorCode::UnexpectedError,
                   "failed to serialize index, " + KnowhereStatusString(stat));
@@ -162,7 +150,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     auto is_partition_key_isolation =
         GetValueFromConfig<bool>(build_config, "partition_key_isolation");
     if (opt_fields.has_value() &&
-        index_.IsAdditionalScalarSupported(
+        GetAccessor()->Get()->IsAdditionalScalarSupported(
             is_partition_key_isolation.value_or(false))) {
         build_config[VEC_OPT_FIELDS_PATH] =
             file_manager_->CacheOptFieldToDisk(opt_fields.value());
@@ -172,7 +160,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
 
     build_config.erase("insert_files");
     build_config.erase(VEC_OPT_FIELDS);
-    auto stat = index_.Build({}, build_config);
+    auto stat = GetAccessor()->Get()->Build({}, build_config);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::IndexBuildError,
                   "failed to build disk index, " + KnowhereStatusString(stat));
@@ -226,7 +214,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto raw_data = const_cast<void*>(milvus::GetDatasetTensor(dataset));
     local_chunk_manager->Write(local_data_path, offset, raw_data, data_size);
 
-    auto stat = index_.Build({}, build_config);
+    auto stat = GetAccessor()->Get()->Build({}, build_config);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::IndexBuildError,
                   "failed to build index, " + KnowhereStatusString(stat));
@@ -269,7 +257,8 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
     auto final = [&] {
         if (CheckAndUpdateKnowhereRangeSearchParam(
                 search_info, topk, GetMetricType(), search_config)) {
-            auto res = index_.RangeSearch(dataset, search_config, bitset);
+            auto res = GetAccessor()->Get()->RangeSearch(
+                dataset, search_config, bitset);
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
                           fmt::format("failed to range search: {}: {}",
@@ -279,7 +268,8 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             return ReGenRangeSearchResult(
                 res.value(), topk, num_queries, GetMetricType());
         } else {
-            auto res = index_.Search(dataset, search_config, bitset);
+            auto res =
+                GetAccessor()->Get()->Search(dataset, search_config, bitset);
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
                           fmt::format("failed to search: {}: {}",
@@ -316,13 +306,13 @@ knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
                                        const knowhere::Json& conf,
                                        const BitsetView& bitset) const {
-    return this->index_.AnnIterator(dataset, conf, bitset);
+    return GetAccessor()->Get()->AnnIterator(dataset, conf, bitset);
 }
 
 template <typename T>
 const bool
 VectorDiskAnnIndex<T>::HasRawData() const {
-    return index_.HasRawData(GetMetricType());
+    return GetAccessor()->Get()->HasRawData(GetMetricType());
 }
 
 template <typename T>
@@ -333,7 +323,7 @@ VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
         PanicInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, index is sparse");
     }
-    auto res = index_.GetVectorByIds(dataset);
+    auto res = GetAccessor()->Get()->GetVectorByIds(dataset);
     if (!res.has_value()) {
         PanicInfo(ErrorCode::UnexpectedError,
                   fmt::format("failed to get vector: {}: {}",
@@ -366,35 +356,13 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
     knowhere::Json load_config;
     load_config.update(config);
 
-    // set data path
-    auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
-    load_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
-
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
-        // set base info
-        load_config[DISK_ANN_PREPARE_WARM_UP] = false;
-        load_config[DISK_ANN_PREPARE_USE_BFS_CACHE] = false;
-
-        // set threads number
-        auto num_threads = GetValueFromConfig<std::string>(
-            load_config, DISK_ANN_LOAD_THREAD_NUM);
-        AssertInfo(
-            num_threads.has_value(),
-            "param " + std::string(DISK_ANN_LOAD_THREAD_NUM) + "is empty");
-        load_config[DISK_ANN_THREADS_NUM] =
-            std::atoi(num_threads.value().c_str());
-
         // update search_beamwidth
         auto beamwidth = GetValueFromConfig<std::string>(
             load_config, DISK_ANN_QUERY_BEAMWIDTH);
         if (beamwidth.has_value()) {
             search_beamwidth_ = std::atoi(beamwidth.value().c_str());
         }
-    }
-
-    if (config.contains(MMAP_FILE_PATH)) {
-        load_config.erase(MMAP_FILE_PATH);
-        load_config[ENABLE_MMAP] = true;
     }
 
     return load_config;

@@ -23,11 +23,11 @@ class EvictionManager {
  public:
     EvictionManager(StorageType storage_type, size_t max_size);
 
-   //  void
-   //  register_slot(uint64_t slot_id, size_t num_cells);
+    //  void
+    //  register_slot(uint64_t slot_id, size_t num_cells);
 
-   //  void
-   //  unregister_slot(uint64_t slot_id, size_t num_cells);
+    //  void
+    //  unregister_slot(uint64_t slot_id, size_t num_cells);
 
     size_t
     bytes_used() const;
