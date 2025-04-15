@@ -41,7 +41,7 @@ if (USE_OPENDAL)
 endif()
 add_subdirectory(tantivy)
 
-if (LINUX)
-    add_subdirectory(jemalloc)
-endif()
+# if (LINUX)
+#     add_subdirectory(jemalloc)
+# endif()
 
