@@ -359,7 +359,7 @@ COPY ./internal/core/output/lib/ /milvus/lib/
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
-ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
+ENV LD_PRELOAD=/milvus/lib/libmimalloc.so
 ENV MALLOC_CONF=background_thread:true
 
 # Add Tini

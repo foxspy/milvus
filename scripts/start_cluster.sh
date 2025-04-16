@@ -17,12 +17,12 @@
 # limitations under the License.
 
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-  LIBJEMALLOC=$PWD/internal/core/output/lib/libjemalloc.so
-  if test -f "$LIBJEMALLOC"; then
+  LIBMIMALLOC=$PWD/internal/core/output/lib/libmimalloc.so
+  if test -f "$LIBMIMALLOC"; then
     #echo "Found $LIBJEMALLOC"
-    export LD_PRELOAD="$LIBJEMALLOC"
+    export LD_PRELOAD="$LIBMIMALLOC"
   else
-    echo "WARN: Cannot find $LIBJEMALLOC"
+    echo "WARN: Cannot find $LIBMIMALLOC"
   fi
   export LD_LIBRARY_PATH=$PWD/internal/core/output/lib/:$LD_LIBRARY_PATH
 fi
