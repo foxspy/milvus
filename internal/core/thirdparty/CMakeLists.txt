@@ -42,6 +42,6 @@ endif()
 add_subdirectory(tantivy)
 
 if (LINUX)
-    add_subdirectory(jemalloc)
+    add_subdirectory(mimalloc)
 endif()
 
