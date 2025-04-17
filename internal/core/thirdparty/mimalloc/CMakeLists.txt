@@ -17,11 +17,14 @@ else ()
     set(MIMALLOC_SOURCE_URL "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.2.3.tar.gz")
 endif ()
 
-message(STATUS "Building mimalloc from source")
+message(STATUS "Building mimalloc from source in Debug mode with MI_GUARDED=ON")
 
 set(MIMALLOC_PREFIX "${CMAKE_INSTALL_PREFIX}")
 set(MIMALLOC_LIB_DIR "${MIMALLOC_PREFIX}/lib")
 set(MIMALLOC_STATIC_LIB "${MIMALLOC_LIB_DIR}/libmimalloc${CMAKE_STATIC_LIBRARY_SUFFIX}")
+
+# 保存当前的 CMAKE_BUILD_TYPE
+set(SAVED_BUILD_TYPE ${CMAKE_BUILD_TYPE})
 
 ExternalProject_Add(
     mimalloc_ep
@@ -29,11 +32,15 @@ ExternalProject_Add(
     URL ${MIMALLOC_SOURCE_URL}
     CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX=${MIMALLOC_PREFIX}
-        -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+        -DCMAKE_BUILD_TYPE=Debug  # 强制使用 Debug 模式
         -DMI_BUILD_SHARED=ON
         -DMI_BUILD_STATIC=OFF
         -DMI_BUILD_TESTS=OFF
         -DMI_BUILD_OBJECT=OFF
+        -DMI_DEBUG_FULL=ON        # 启用完整的调试功能
+        -DMI_SECURE=ON           # 启用安全检查
+        -DMI_SECURE_FULL=ON      # 启用完整的安全检查
+        -DMI_GUARDED=ON          # 启用 guard pages 保护
     BUILD_BYPRODUCTS "${MIMALLOC_STATIC_LIB}"
 )
 
@@ -43,3 +50,6 @@ set_target_properties(mimalloc
     IMPORTED_LOCATION "${MIMALLOC_PREFIX}/${CMAKE_INSTALL_LIBDIR}/libmimalloc.so"
     INTERFACE_INCLUDE_DIRECTORIES "${MIMALLOC_PREFIX}/include")
 add_dependencies(mimalloc mimalloc_ep)
+
+# 恢复原来的 CMAKE_BUILD_TYPE
+set(CMAKE_BUILD_TYPE ${SAVED_BUILD_TYPE})
