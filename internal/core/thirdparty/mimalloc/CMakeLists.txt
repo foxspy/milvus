@@ -47,7 +47,7 @@ ExternalProject_Add(
 add_library(mimalloc SHARED IMPORTED)
 set_target_properties(mimalloc
     PROPERTIES 
-    IMPORTED_LOCATION "${MIMALLOC_PREFIX}/${CMAKE_INSTALL_LIBDIR}/libmimalloc.so"
+    IMPORTED_LOCATION "${MIMALLOC_PREFIX}/${CMAKE_INSTALL_LIBDIR}/libmimalloc-secure-debug.so"
     INTERFACE_INCLUDE_DIRECTORIES "${MIMALLOC_PREFIX}/include")
 add_dependencies(mimalloc mimalloc_ep)
 

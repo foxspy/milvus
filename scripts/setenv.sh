@@ -43,7 +43,7 @@ case "${unameOut}" in
           export MILVUS_ENABLE_ASAN_LIB="$MILVUS_ENABLE_ASAN_LIB"
       fi
 
-      LIBMIMALLOC=$PWD/internal/core/output/lib/libmimalloc.so
+      LIBMIMALLOC=$PWD/internal/core/output/lib/libmimalloc-secure-debug.so
       if test -f "$LIBMIMALLOC"; then
         export LD_PRELOAD="$LIBMIMALLOC"
       else

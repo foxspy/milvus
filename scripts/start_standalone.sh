@@ -17,7 +17,7 @@
 # limitations under the License.
 
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-	LIBMIMALLOC=$PWD/internal/core/output/lib/libmimalloc.so
+	LIBMIMALLOC=$PWD/internal/core/output/lib/libmimalloc-secure-debug.so
 	if test -f "$LIBMIMALLOC"; then
 		#echo "Found $LIBJEMALLOC"
 		export LD_PRELOAD="$LIBMIMALLOC"
