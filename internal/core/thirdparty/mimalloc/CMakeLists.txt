@@ -23,8 +23,12 @@ set(MIMALLOC_PREFIX "${CMAKE_INSTALL_PREFIX}")
 set(MIMALLOC_LIB_DIR "${MIMALLOC_PREFIX}/lib")
 set(MIMALLOC_STATIC_LIB "${MIMALLOC_LIB_DIR}/libmimalloc${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-# 保存当前的 CMAKE_BUILD_TYPE
-set(SAVED_BUILD_TYPE ${CMAKE_BUILD_TYPE})
+# 配置 pkg-config 文件
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/mimalloc.pc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/mimalloc.pc"
+    @ONLY
+)
 
 ExternalProject_Add(
     mimalloc_ep
@@ -32,15 +36,16 @@ ExternalProject_Add(
     URL ${MIMALLOC_SOURCE_URL}
     CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX=${MIMALLOC_PREFIX}
-        -DCMAKE_BUILD_TYPE=Debug  # 强制使用 Debug 模式
+        -DCMAKE_BUILD_TYPE=Debug
         -DMI_BUILD_SHARED=ON
         -DMI_BUILD_STATIC=OFF
         -DMI_BUILD_TESTS=OFF
         -DMI_BUILD_OBJECT=OFF
-        -DMI_DEBUG_FULL=ON        # 启用完整的调试功能
-        -DMI_SECURE=ON           # 启用安全检查
-        -DMI_SECURE_FULL=ON      # 启用完整的安全检查
-        -DMI_GUARDED=ON          # 启用 guard pages 保护
+        -DMI_DEBUG_FULL=ON
+        -DMI_SECURE=ON
+        -DMI_SECURE_FULL=ON
+        -DMI_GUARDED=ON
+        -DMI_INSTALL_TOPLEVEL=ON           # 安装到顶层目录
     BUILD_BYPRODUCTS "${MIMALLOC_STATIC_LIB}"
 )
 
@@ -51,5 +56,6 @@ set_target_properties(mimalloc
     INTERFACE_INCLUDE_DIRECTORIES "${MIMALLOC_PREFIX}/include")
 add_dependencies(mimalloc mimalloc_ep)
 
-# 恢复原来的 CMAKE_BUILD_TYPE
-set(CMAKE_BUILD_TYPE ${SAVED_BUILD_TYPE})
+# 安装 pkg-config 文件
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/mimalloc.pc"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
