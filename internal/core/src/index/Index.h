@@ -18,6 +18,7 @@
 
 #include <memory>
 #include <boost/dynamic_bitset.hpp>
+#include "cachinglayer/CacheSlot.h"
 #include "common/FieldData.h"
 #include "common/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
@@ -77,6 +78,12 @@ class IndexBase {
         return DataType::NONE;
     }
 
+    // TODO: how to get the cell byte size?
+    virtual size_t
+    CellByteSize() const {
+        return 0;
+    }
+
  protected:
     explicit IndexBase(IndexType index_type)
         : index_type_(std::move(index_type)) {
@@ -86,4 +93,6 @@ class IndexBase {
 };
 
 using IndexBasePtr = std::unique_ptr<IndexBase>;
+using CacheIndexBasePtr =
+    std::shared_ptr<milvus::cachinglayer::CacheSlot<IndexBase>>;
 }  // namespace milvus::index

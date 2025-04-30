@@ -129,6 +129,7 @@ class SegmentSealed : public SegmentInternalInterface {
             return hash_result;
         }
     };
+    // TODO: use cache layer to replace json index
     std::unordered_map<JSONIndexKey, index::IndexBasePtr, hash_helper>
         json_indexings_;
 };

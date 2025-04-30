@@ -11,6 +11,7 @@
 
 #include "segcore/load_index_c.h"
 
+#include "cachinglayer/Translator.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/EasyAssert.h"
@@ -30,6 +31,8 @@
 #include "pb/cgo_msg.pb.h"
 #include "knowhere/index/index_static.h"
 #include "knowhere/comp/knowhere_check.h"
+#include "cachinglayer/Manager.h"
+#include "index/IndexTranslator.h"
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
@@ -343,6 +346,15 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, remote_chunk_manager);
         fileManagerContext.set_for_loading_index(true);
+
+        std::unique_ptr<
+            milvus::cachinglayer::Translator<milvus::index::IndexBase>>
+            translator = std::make_unique<milvus::index::IndexTranslator>(
+                index_info, load_index_info, ctx, fileManagerContext, config);
+
+        load_index_info->cache_index =
+            milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+                std::move(translator));
 
         load_index_info->index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(

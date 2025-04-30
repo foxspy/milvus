@@ -486,7 +486,7 @@ class SegmentInternalInterface : public SegmentInterface {
                           const FixedVector<int32_t>& offsets) const = 0;
 
     // internal API: return chunk_index in span, support scalar index only
-    virtual const index::IndexBase*
+    virtual const index::CacheIndexBasePtr
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const = 0;
     virtual void
     check_search(const query::Plan* plan) const = 0;
