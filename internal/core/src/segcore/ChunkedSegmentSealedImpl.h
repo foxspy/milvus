@@ -44,6 +44,24 @@ class InsertRecordTranslator;
 
 using namespace milvus::cachinglayer;
 
+class InterimIndexTranslator : public milvus::cachinglayer::Translator<milvus::index::IndexBase> {
+ public:
+    InterimIndexTranslator();
+    size_t
+    num_cells() const override;
+    milvus::cachinglayer::cid_t
+    cell_id_of(milvus::cachinglayer::uid_t uid) const override;
+    milvus::cachinglayer::ResourceUsage
+    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+    const std::string&
+    key() const override;
+    std::vector<std::pair<milvus::cachinglayer::cid_t,
+                          std::unique_ptr<milvus::index::IndexBase>>>
+    get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
+    Meta*
+    meta() override;
+};
+
 class ChunkedSegmentSealedImpl : public SegmentSealed {
  public:
     explicit ChunkedSegmentSealedImpl(SchemaPtr schema,
@@ -262,7 +280,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                           int64_t chunk_id,
                           const FixedVector<int32_t>& offsets) const override;
 
-    const index::IndexBase*
+    PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]],
@@ -398,7 +416,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::optional<int64_t> num_rows_;
 
     // scalar field index
-    std::unordered_map<FieldId, index::IndexBasePtr> scalar_indexings_;
+    std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings_;
     // vector field index
     SealedIndexingRecord vector_indexings_;
 

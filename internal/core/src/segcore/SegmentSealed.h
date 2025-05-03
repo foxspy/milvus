@@ -16,6 +16,7 @@
 
 #include "common/LoadInfo.h"
 #include "common/Types.h"
+#include "index/Index.h"
 #include "pb/segcore.pb.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
@@ -70,7 +71,7 @@ class SegmentSealed : public SegmentInternalInterface {
         return SegmentType::Sealed;
     }
 
-    index::IndexBase*
+    PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id,
                      std::string path,
                      int64_t chunk_id) const override {
@@ -79,7 +80,7 @@ class SegmentSealed : public SegmentInternalInterface {
         key.nested_path = path;
         AssertInfo(json_indexings_.find(key) != json_indexings_.end(),
                    "Cannot find json index with path: " + path);
-        return json_indexings_.at(key).get();
+        return PinWrapper<const index::IndexBase*>(json_indexings_.at(key).get());
     }
 
     virtual bool
