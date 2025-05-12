@@ -17,7 +17,7 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES 
 set( KNOWHERE_VERSION cardinal_segv_52_8 )
 set( GIT_REPOSITORY  "https://github.com/foxspy/knowhere.git")
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
- message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
+message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
 
 message(STATUS "Building knowhere-${KNOWHERE_SOURCE_VER} from source")
 message(STATUS ${CMAKE_BUILD_TYPE})
