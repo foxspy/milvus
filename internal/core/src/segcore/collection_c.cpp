@@ -14,15 +14,24 @@
 #include <malloc.h>
 #endif
 
+#include <jemalloc/jemalloc.h>
+
 #include <iostream>
 #include "segcore/collection_c.h"
 #include "segcore/Collection.h"
+#include "log/Log.h"
+
+void print_jemalloc_stats() {
+   LOG_INFO("print jemalloc stats info");
+   malloc_stats_print(NULL, NULL, NULL);
+}
 
 CStatus
 NewCollection(const void* schema_proto_blob,
               const int64_t length,
               CCollection* newCollection) {
     try {
+        print_jemalloc_stats();
         auto collection = std::make_unique<milvus::segcore::Collection>(
             schema_proto_blob, length);
         *newCollection = collection.release();
