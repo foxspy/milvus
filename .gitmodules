@@ -1,0 +1,3 @@
+[submodule "internal/core/src/base"]
+	path = internal/core/src/base
+	url = git@github.com:zilliztech/milvus-common.git

@@ -17,7 +17,7 @@
 #include "GroupByNode.h"
 
 #include "exec/operator/groupby/SearchGroupByOperator.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/monitor.h"
 
 namespace milvus {
 namespace exec {

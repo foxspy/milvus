@@ -12,7 +12,7 @@
 #include <chrono>
 #include "Executor.h"
 #include "common/Common.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/monitor.h"
 
 namespace milvus::futures {
 

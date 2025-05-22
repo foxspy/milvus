@@ -51,7 +51,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/monitor.h"
 
 namespace milvus::index {
 

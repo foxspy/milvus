@@ -20,7 +20,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/monitor.h"
 #include "storage/azure/AzureChunkManager.h"
 
 namespace milvus {

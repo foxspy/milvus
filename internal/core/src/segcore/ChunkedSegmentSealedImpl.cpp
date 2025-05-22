@@ -47,7 +47,7 @@
 #include "index/VectorMemIndex.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/Types.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/monitor.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
 #include "query/SearchOnSealed.h"
@@ -1465,10 +1465,10 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
             get_bit(binlog_index_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
                        "vector index is not ready");
-            AssertInfo(index_has_raw_data_.find(fieldID) !=
-                           index_has_raw_data_.end(),
-                       "index_has_raw_data_ is not set for fieldID: " +
-                           std::to_string(fieldID.get()));
+            AssertInfo(
+                index_has_raw_data_.find(fieldID) != index_has_raw_data_.end(),
+                "index_has_raw_data_ is not set for fieldID: " +
+                    std::to_string(fieldID.get()));
             return index_has_raw_data_.at(fieldID);
         }
     } else if (IsJsonDataType(field_meta.get_data_type())) {
@@ -1476,10 +1476,10 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
     } else {
         auto scalar_index = scalar_indexings_.find(fieldID);
         if (scalar_index != scalar_indexings_.end()) {
-            AssertInfo(index_has_raw_data_.find(fieldID) !=
-                           index_has_raw_data_.end(),
-                       "index_has_raw_data_ is not set for fieldID: " +
-                           std::to_string(fieldID.get()));
+            AssertInfo(
+                index_has_raw_data_.find(fieldID) != index_has_raw_data_.end(),
+                "index_has_raw_data_ is not set for fieldID: " +
+                    std::to_string(fieldID.get()));
             return index_has_raw_data_.at(fieldID);
         }
     }

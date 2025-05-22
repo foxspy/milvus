@@ -22,7 +22,7 @@
 #include "stdio.h"
 #include <fcntl.h>
 #include "log/Log.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/monitor.h"
 
 namespace milvus::storage {
 namespace {
