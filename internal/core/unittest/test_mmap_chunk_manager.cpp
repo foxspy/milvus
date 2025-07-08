@@ -11,6 +11,43 @@
 
 #include <gtest/gtest.h>
 #include "storage/MmapManager.h"
+
+#include <boost/filesystem/operations.hpp>
+#include <chrono>
+#include <arrow/array/builder_binary.h>
+#include <arrow/array/builder_primitive.h>
+#include <arrow/record_batch.h>
+#include <arrow/type.h>
+#include <arrow/type_fwd.h>
+#include <gtest/gtest.h>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <fstream>
+#include <vector>
+#include <unistd.h>
+
+#include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
+#include "common/Slice.h"
+#include "common/Common.h"
+#include "common/Types.h"
+#include "storage/ChunkManager.h"
+#include "storage/DataCodec.h"
+#include "storage/InsertData.h"
+#include "storage/ThreadPool.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/LocalChunkManagerSingleton.h"
+
+#include "folly/init/Init.h"
+#include "test_utils/Constants.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "test_utils/storage_test_utils.h"
 /*
 checking register function of mmap chunk manager
 */
@@ -42,4 +79,67 @@ TEST(MmapChunkManager, Register) {
     ASSERT_FALSE(
         mcm->HasRegister(get_descriptor(segment_id, SegmentType::Sealed)));
     mcm->UnRegister(get_descriptor(segment_id, SegmentType::Growing));
+}
+
+using namespace std;
+using namespace milvus;
+using namespace milvus::storage;
+using namespace knowhere;
+namespace fs = std::filesystem;
+
+class DiskAnnFileManagerLoadTest : public testing::Test {
+ public:
+    DiskAnnFileManagerLoadTest() {
+    }
+    ~DiskAnnFileManagerLoadTest() {
+    }
+
+    virtual void
+    SetUp() {
+        cm_ = milvus::storage::CreateChunkManager(get_default_local_storage_config());
+    }
+
+ protected:
+    ChunkManagerPtr cm_;
+};
+
+std::vector<std::string> getAllFiles(const fs::path& directory) {
+    std::vector<std::string> filePaths;
+
+    // Iterate through directory and subdirectories
+    for (const auto& entry : fs::recursive_directory_iterator(directory)) {
+        if (fs::is_regular_file(entry.path())) {
+            filePaths.push_back(entry.path().string());
+        }
+    }
+
+    return filePaths;
+}
+
+TEST_F(DiskAnnFileManagerLoadTest, LoadWithManager) {
+    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    std::string indexFilePath = "/tmp/diskann/index_files/1000/index";
+
+    // collection_id: 1, partition_id: 2, segment_id: 3
+    // field_id: 100, index_build_id: 1000, index_version: 1
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+
+    int64_t slice_size = milvus::FILE_SLICE_SIZE;
+    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(filed_data_meta, index_meta, cm_));
+
+    std::vector<std::string> remote_files = getAllFiles(indexFilePath);
+    diskAnnFileManager->CacheIndexToDisk(remote_files);
+    auto local_files = diskAnnFileManager->GetLocalFilePaths();
+
+    for (auto file : local_files) {
+        std::cout << "local_file: " << file << std::endl;
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(300));
+
+    for (auto file : local_files) {
+        cm_->Remove(file);
+    }
 }

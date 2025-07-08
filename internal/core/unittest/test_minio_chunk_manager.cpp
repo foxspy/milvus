@@ -16,6 +16,8 @@
 #include "storage/MinioChunkManager.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
+
+
 using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
@@ -300,6 +302,9 @@ TEST_F(MinioChunkManagerTest, ListWithPrefixPositive) {
     chunk_manager_->Remove(path3);
     chunk_manager_->DeleteBucket(testBucketName);
 }
+
+
+
 
 //TEST_F(AliyunChunkManagerTest, ReadPositive) {
 //    string testBucketName = "vdc-infra-poc";
