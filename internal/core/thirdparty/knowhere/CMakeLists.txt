@@ -15,7 +15,7 @@
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
 set( KNOWHERE_VERSION fix_cardinal_v2_segv_2 )
-set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
+set( GIT_REPOSITORY  "https://github.com/foxspy/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
