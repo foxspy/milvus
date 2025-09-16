@@ -20,16 +20,47 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-# upgrade gcc to 12
-RUN apt-get update && apt-get install -y gcc-12 g++-12 && cd /usr/bin \
-    && unlink gcc && ln -s gcc-12 gcc \
-    && unlink g++ && ln -s g++-12 g++ \
-    && unlink gcov && ln -s gcov-12 gcov
+# Build and install GCC 15 from source
+RUN apt-get update && apt-get install -y build-essential libgmp-dev libmpfr-dev libmpc-dev \
+    flex bison texinfo && \
+    rm -rf /var/lib/apt/lists/*
+
+# Download and compile GCC 15
+RUN cd /tmp && \
+    wget https://ftp.gnu.org/gnu/gcc/gcc-15.1.0/gcc-15.1.0.tar.xz && \
+    tar -xf gcc-15.1.0.tar.xz && \
+    cd gcc-15.1.0 && \
+    ./contrib/download_prerequisites && \
+    mkdir build && cd build && \
+    ../configure --enable-languages=c,c++ --disable-multilib --enable-threads=posix && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && rm -rf /tmp/gcc-15.1.0*
+
+# Update symlinks to use GCC 15
+RUN cd /usr/bin && \
+    rm -f gcc g++ gcov && \
+    ln -s /usr/local/bin/gcc gcc && \
+    ln -s /usr/local/bin/g++ g++ && \
+    ln -s /usr/local/bin/gcov gcov
+
+# Update library path for GCC 15
+RUN echo "/usr/local/lib64" >> /etc/ld.so.conf.d/gcc15.conf && ldconfig
+
+# Set environment variables for GCC 15
+ENV CC=/usr/local/bin/gcc
+ENV CXX=/usr/local/bin/g++
+ENV LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
 
 RUN pip3 install conan==1.64.1
 
+# Copy and setup GCC 15 conan profile
+COPY --chown=0:0 build/docker/builder/cpu/ubuntu22.04/conanprofile.txt /root/.conan/profiles/gcc15
+RUN conan profile update settings.compiler.version=15 default && \
+    conan profile update settings.compiler.libcxx=libstdc++11 default
+
 RUN echo "target arch $TARGETARCH"
-RUN wget -qO- "https://cmake.org/files/v3.31/cmake-3.31.8-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
+RUN wget -qO- "https://cmake.org/files/v3.32/cmake-3.32.0-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 
 # Install Go
 ENV GOPATH /go

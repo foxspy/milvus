@@ -1,0 +1,17 @@
+[settings]
+os=Linux
+arch=x86_64
+compiler=gcc
+compiler.version=15
+compiler.libcxx=libstdc++11
+build_type=Release
+
+[options]
+
+[build_requires]
+
+[env]
+CC=/usr/local/bin/gcc
+CXX=/usr/local/bin/g++
+CFLAGS=-w
+CXXFLAGS=-w -std=c++17
