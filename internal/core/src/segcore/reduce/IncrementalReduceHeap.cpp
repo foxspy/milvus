@@ -203,7 +203,7 @@ IncrementalReduceHeap::Finalize(CSearchResultDataBlobs* out_result) {
     int64_t slice_nq = nq_;
     int64_t slice_topK = topK_;
     auto reduce_helper = std::make_shared<ReduceHelper>(
-        sr_ptrs, plan, &slice_nq, &slice_topK, 1, nullptr);
+        sr_ptrs, plan, nullptr, &slice_nq, &slice_topK, 1, nullptr, nullptr);
     reduce_helper->Reduce();
     reduce_helper->Marshal();
     *out_result = reduce_helper->GetSearchResultDataBlobs();
