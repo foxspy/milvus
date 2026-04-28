@@ -327,6 +327,20 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		growing = []SegmentEntry{}
 	}
 
+	// Adaptive search: order-based batched dispatch (parallel path, falls back on error).
+	if sd.shouldUseAdaptiveSearch(req) {
+		results, err := sd.adaptiveSearch(ctx, req, sealed, growing, sealedRowCount)
+		if err == nil {
+			return results, nil
+		}
+		// Fallback to one-shot path on error.
+		metrics.QueryNodeAdaptiveSearchTotal.WithLabelValues(
+			paramtable.GetStringNodeID(),
+			fmt.Sprint(sd.collectionID),
+			"fallback").Inc()
+		log.Warn("adaptive search fallback to one-shot", zap.Error(err))
+	}
+
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
 		func() {
 			sd.partitionStatsMut.RLock()

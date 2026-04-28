@@ -67,6 +67,7 @@ set(MILVUS_TEST_FILES
         test_external_take.cpp
         test_arrow_canonicalize.cpp
         TextLobSpilloverTest.cpp
+        test_incremental_reduce.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

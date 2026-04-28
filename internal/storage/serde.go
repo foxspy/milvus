@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/bitutil"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/compress"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
@@ -1265,6 +1266,35 @@ func NewSimpleArrowRecord(r arrow.Record, field2Col map[FieldID]int) *simpleArro
 		r:         r,
 		field2Col: field2Col,
 	}
+}
+
+// CopyRecordToGoMemory returns a Record whose columns are deep-copied into
+// Go-allocated memory. Used to defend against FFI-backed arrow.Record buffers
+// being torn down mid-processing (milvus-storage packed reader unmaps arrow
+// buffers while Go still holds slice pointers into them).
+func CopyRecordToGoMemory(r Record) (Record, error) {
+	sr, ok := r.(*simpleArrowRecord)
+	if !ok {
+		return r, nil
+	}
+	src := sr.r
+	mem := memory.NewGoAllocator()
+	cols := make([]arrow.Array, src.NumCols())
+	for i := int64(0); i < src.NumCols(); i++ {
+		copied, err := array.Concatenate([]arrow.Array{src.Column(int(i))}, mem)
+		if err != nil {
+			for j := int64(0); j < i; j++ {
+				cols[j].Release()
+			}
+			return nil, err
+		}
+		cols[i] = copied
+	}
+	newRec := array.NewRecord(src.Schema(), cols, src.NumRows())
+	for _, c := range cols {
+		c.Release()
+	}
+	return &simpleArrowRecord{r: newRec, field2Col: sr.field2Col}, nil
 }
 
 func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.CollectionSchema) error {

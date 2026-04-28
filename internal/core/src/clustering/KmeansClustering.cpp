@@ -64,7 +64,48 @@ KmeansClustering::FetchDataFiles(uint8_t* buf,
                                  const int64_t expected_remote_file_size,
                                  const std::vector<std::string>& files,
                                  const int64_t dim,
-                                 int64_t& offset) {
+                                 int64_t& offset,
+                                 int64_t segment_id) {
+    // Storage v2/v3 path: use per-segment manifest to resolve actual data files.
+    // Requires segment_id so we can pick the correct manifest. When random_sample
+    // mixes files across segments (segment_id=-1), we cannot use a single
+    // manifest — caller must pass per-segment calls in that case.
+    if (storage_version_ >= STORAGE_V2 && segment_id >= 0) {
+        auto manifest_it = segment_manifests_.find(segment_id);
+        AssertInfo(manifest_it != segment_manifests_.end() &&
+                       !manifest_it->second.empty(),
+                   "[KmeansClustering] storage v2/v3 requires manifest path "
+                   "for segment {}",
+                   segment_id);
+
+        Config config;
+        config[STORAGE_VERSION_KEY] = storage_version_;
+        config[SEGMENT_MANIFEST_KEY] = manifest_it->second;
+        config[DATA_TYPE_KEY] = v2_data_type_;
+        config[ELEMENT_TYPE_KEY] = v2_element_type_;
+        config[DIM_KEY] = v2_dim_;
+
+        auto field_datas = file_manager_->CacheRawDataToMemory(config);
+        int64_t fetched_file_size = 0;
+        for (auto& data : field_datas) {
+            size_t size = std::min(expected_train_size - offset, data->Size());
+            if (size <= 0) {
+                break;
+            }
+            fetched_file_size += size;
+            std::memcpy(buf + offset, data->Data(), size);
+            offset += size;
+            data.reset();
+        }
+        AssertInfo(fetched_file_size == expected_remote_file_size,
+                   "[StorageV2] file size inconsistent, expected: {}, "
+                   "actual: {}",
+                   expected_remote_file_size,
+                   fetched_file_size);
+        return;
+    }
+
+    // Legacy v1 path: files are concrete binlog object keys.
     // CacheRawDataToMemory mostly used as pull files from one segment
     // So we could assume memory is always enough for theses cases
     // But in clustering when we sample train data, first pre-allocate the large buffer(size controlled by config) for future knowhere usage
@@ -112,6 +153,36 @@ KmeansClustering::SampleTrainData(
     std::vector<std::string> files;
 
     if (random_sample) {
+        if (storage_version_ >= STORAGE_V2) {
+            // Storage v2/v3: manifest is per-segment, cannot shuffle files across
+            // segments. Iterate segments in shuffled order; within each segment,
+            // CacheRawDataToMemory already reads all packed data atomically.
+            std::vector<int64_t> shuffled_segment_ids(segment_ids.begin(),
+                                                     segment_ids.end());
+            std::mt19937 rng(
+                static_cast<unsigned int>(std::time(nullptr)));
+            std::shuffle(shuffled_segment_ids.begin(),
+                         shuffled_segment_ids.end(),
+                         rng);
+            for (int64_t cur_segment_id : shuffled_segment_ids) {
+                if (offset >= expected_train_size) {
+                    break;
+                }
+                const auto& seg_files =
+                    segment_file_paths.at(cur_segment_id);
+                FetchDataFiles<T>(
+                    buf,
+                    expected_train_size,
+                    segment_num_rows.at(cur_segment_id) * dim * sizeof(T),
+                    seg_files,
+                    dim,
+                    offset,
+                    cur_segment_id);
+            }
+            return;
+        }
+        // Legacy v1: files can be shuffled globally since each file is a
+        // standalone binlog object.
         for (auto& [segment_id, segment_files] : segment_file_paths) {
             for (auto& segment_file : segment_files) {
                 files.emplace_back(segment_file);
@@ -144,7 +215,8 @@ KmeansClustering::SampleTrainData(
                           segment_num_rows.at(cur_segment_id) * dim * sizeof(T),
                           files,
                           dim,
-                          offset);
+                          offset,
+                          cur_segment_id);
     }
 }
 
@@ -314,7 +386,8 @@ KmeansClustering::StreamingAssignandUpload(
                               num_row * dim * sizeof(T),
                               insert_files.at(segment_id),
                               dim,
-                              offset);
+                              offset,
+                              segment_id);
             auto dataset = GenDataset(num_row, dim, buf.release());
             dataset->SetIsOwner(true);
             auto res = cluster_node.Assign(*dataset);
@@ -352,11 +425,33 @@ template <typename T>
 void
 KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
     std::map<int64_t, std::vector<std::string>> insert_files;
+    std::map<int64_t, std::string> segment_manifests;
     for (const auto& pair : config.insert_files()) {
         std::vector<std::string> segment_files(
             pair.second.insert_files().begin(),
             pair.second.insert_files().end());
         insert_files[pair.first] = std::move(segment_files);
+        if (!pair.second.manifest_path().empty()) {
+            segment_manifests[pair.first] = pair.second.manifest_path();
+        }
+    }
+
+    // Set storage v2/v3 context if applicable. The field type + dim come from
+    // the AnalyzeInfo proto; element type defaults to the field type (vector
+    // array element types are not supported for clustering).
+    if (config.storage_version() >= STORAGE_V2) {
+        AssertInfo(segment_manifests.size() == insert_files.size(),
+                   "[StorageV2] all segments must carry manifest_path; got "
+                   "{} manifests vs {} segments",
+                   segment_manifests.size(),
+                   insert_files.size());
+        auto data_type = static_cast<milvus::proto::schema::DataType>(
+            config.field_schema().data_type());
+        SetStorageV2(config.storage_version(),
+                     segment_manifests,
+                     data_type,
+                     data_type,
+                     config.dim());
     }
 
     std::map<int64_t, int64_t> num_rows(config.num_rows().begin(),
@@ -397,6 +492,93 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
                    segment_id);
     }
     size_t trained_segments_num = 0;
+
+    // === External centroids branch ===
+    // When external_centroids_path is non-empty, skip kmeans Fit entirely.
+    // Download the pre-computed centroids, inject via SetCentroids, run
+    // StreamingAssignandUpload for every segment (trained_segments_num == 0).
+    if (!config.external_centroids_path().empty()) {
+        const auto& ext_path = config.external_centroids_path();
+        LOG_INFO(msg_header_ +
+                     "external centroids path provided, skipping kmeans Fit: {}",
+                 ext_path);
+
+        // Download the raw bytes (simple format: int32 n_clusters | int32 dim
+        // | float32 n_clusters*dim).
+        auto chunk_mgr = file_manager_->GetChunkManager();
+        if (!chunk_mgr->Exist(ext_path)) {
+            throw SegcoreError(
+                ErrorCode::FileOpenFailed,
+                fmt::format("external centroids file not found: {}", ext_path));
+        }
+        auto file_size = chunk_mgr->Size(ext_path);
+        AssertInfo(file_size >= 8,
+                   "external centroids file too small: {}",
+                   file_size);
+        std::unique_ptr<uint8_t[]> buf(new uint8_t[file_size]);
+        chunk_mgr->Read(ext_path, buf.get(), file_size);
+
+        int32_t n_clusters_hdr =
+            *reinterpret_cast<const int32_t*>(buf.get());
+        int32_t dim_hdr =
+            *reinterpret_cast<const int32_t*>(buf.get() + sizeof(int32_t));
+        AssertInfo(n_clusters_hdr > 0 && dim_hdr == dim,
+                   "external centroids header mismatch: got n={} dim={}, "
+                   "expected dim={}",
+                   n_clusters_hdr,
+                   dim_hdr,
+                   dim);
+        size_t expected_size =
+            2 * sizeof(int32_t) + n_clusters_hdr * dim * sizeof(float);
+        AssertInfo(file_size == expected_size,
+                   "external centroids file size mismatch: got {}, expected {}",
+                   file_size,
+                   expected_size);
+
+        // Override num_clusters from file header.
+        num_clusters = n_clusters_hdr;
+
+        // Inject centroids into cluster_node via SetCentroids.
+        auto centroid_ds = GenDataset(
+            num_clusters, dim, buf.get() + 2 * sizeof(int32_t));
+        centroid_ds->SetIsOwner(false);
+        auto st = cluster_node.SetCentroids(*centroid_ds);
+        if (st != knowhere::Status::success) {
+            throw SegcoreError(
+                ErrorCode::KnowhereError,
+                fmt::format("SetCentroids failed: status={}",
+                            static_cast<int>(st)));
+        }
+        LOG_INFO(msg_header_ +
+                     "loaded {} centroids with dim={} from {}",
+                 num_clusters,
+                 dim,
+                 ext_path);
+
+        // Build empty id_mapping_stats + centroid_stats from GetCentroids.
+        auto centroids_res = cluster_node.GetCentroids();
+        AssertInfo(centroids_res.has_value(),
+                   "GetCentroids() failed after SetCentroids");
+        centroids_res.value()->SetIsOwner(false);
+        auto centroids_ptr =
+            reinterpret_cast<const T*>(centroids_res.value()->GetTensor());
+        auto centroid_stats =
+            CentroidsToPB<T>(centroids_ptr, num_clusters, dim);
+        std::vector<milvus::proto::clustering::ClusteringCentroidIdMappingStats>
+            empty_id_mapping_stats;
+        // All segments go through "streaming assign" branch (trained_segments_num=0).
+        StreamingAssignandUpload<T>(cluster_node,
+                                    config,
+                                    centroid_stats,
+                                    empty_id_mapping_stats,
+                                    segment_ids,
+                                    insert_files,
+                                    num_rows,
+                                    dim,
+                                    /*trained_segments_num=*/0,
+                                    num_clusters);
+        return;  // done
+    }
 
     size_t data_size = data_num * dim * sizeof(T);
     size_t train_num = train_size / sizeof(T) / dim;
@@ -515,7 +697,8 @@ KmeansClustering::FetchDataFiles<float>(uint8_t* buf,
                                         const int64_t expected_remote_file_size,
                                         const std::vector<std::string>& files,
                                         const int64_t dim,
-                                        int64_t& offset);
+                                        int64_t& offset,
+                                        int64_t segment_id);
 template void
 KmeansClustering::SampleTrainData<float>(
     const std::vector<int64_t>& segment_ids,

@@ -3535,6 +3535,8 @@ type queryNodeConfig struct {
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 	EnableSegmentPrune                      ParamItem `refreshable:"true"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"true"`
+	AdaptiveSearchEnabled                   ParamItem `refreshable:"true"`
+	AdaptiveSearchBatchSize                 ParamItem `refreshable:"true"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
 	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
@@ -4728,6 +4730,25 @@ user-task-polling:
 		Doc:          "filter ratio used for pruning segments when searching",
 	}
 	p.DefaultSegmentFilterRatio.Init(base.mgr)
+
+	p.AdaptiveSearchEnabled = ParamItem{
+		Key:          "queryNode.adaptiveSearch.enabled",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "enable order-based batched adaptive search (parallel to one-shot prune)",
+		Export:       true,
+	}
+	p.AdaptiveSearchEnabled.Init(base.mgr)
+
+	p.AdaptiveSearchBatchSize = ParamItem{
+		Key:          "queryNode.adaptiveSearch.batchSize",
+		Version:      "2.6.0",
+		DefaultValue: "auto",
+		Doc:          "batch size for adaptive search: 'auto' or a positive integer",
+		Export:       true,
+	}
+	p.AdaptiveSearchBatchSize.Init(base.mgr)
+
 	p.UseStreamComputing = ParamItem{
 		Key:          "queryNode.useStreamComputing",
 		Version:      "2.4.0",

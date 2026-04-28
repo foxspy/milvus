@@ -29,6 +29,7 @@
 #include "knowhere/cluster/cluster.h"
 #include "knowhere/cluster/cluster_node.h"
 #include "pb/clustering.pb.h"
+#include "pb/schema.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
@@ -56,8 +57,8 @@ class KmeansClustering {
     Run(const milvus::proto::clustering::AnalyzeInfo& config);
 
     // should never be called before run
-    ClusteringResultMeta
-    GetClusteringResultMeta() {
+    const ClusteringResultMeta&
+    GetClusteringResultMeta() const {
         if (!is_runned_) {
             throw SegcoreError(
                 ErrorCode::UnexpectedError,
@@ -126,7 +127,8 @@ class KmeansClustering {
                    const int64_t expected_remote_file_size,
                    const std::vector<std::string>& files,
                    const int64_t dim,
-                   int64_t& offset);
+                   int64_t& offset,
+                   int64_t segment_id = -1);
 
     // given all possible segments, sample data to buffer
     template <typename T>
@@ -139,6 +141,22 @@ class KmeansClustering {
         const int64_t dim,
         const bool random_sample,
         uint8_t* buf);
+
+    // Set storage version + per-segment manifest paths (for storage v2/v3).
+    // When storage_version >= 2, FetchDataFiles reads data via manifest instead
+    // of legacy insert_files paths.
+    void
+    SetStorageV2(int64_t storage_version,
+                 const std::map<int64_t, std::string>& segment_manifests,
+                 milvus::proto::schema::DataType data_type,
+                 milvus::proto::schema::DataType element_type,
+                 int64_t dim) {
+        storage_version_ = storage_version;
+        segment_manifests_ = segment_manifests;
+        v2_data_type_ = data_type;
+        v2_element_type_ = element_type;
+        v2_dim_ = dim;
+    }
 
     // transform centroids result to PB format for future usage of golang side
     template <typename T>
@@ -165,6 +183,15 @@ class KmeansClustering {
     ClusteringResultMeta cluster_result_;
     bool is_runned_ = false;
     std::string msg_header_;
+
+    // Storage v2/v3 support.
+    int64_t storage_version_ = 0;
+    std::map<int64_t, std::string> segment_manifests_;
+    milvus::proto::schema::DataType v2_data_type_ =
+        milvus::proto::schema::DataType::None;
+    milvus::proto::schema::DataType v2_element_type_ =
+        milvus::proto::schema::DataType::None;
+    int64_t v2_dim_ = 0;
 };
 
 using KmeansClusteringPtr = std::unique_ptr<KmeansClustering>;

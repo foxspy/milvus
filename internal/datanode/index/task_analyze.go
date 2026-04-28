@@ -132,7 +132,10 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 				at.req.GetCollectionID(), at.req.GetPartitionID(), segID, at.req.GetFieldID(), id)
 			insertFiles = append(insertFiles, path)
 		}
-		segmentInsertFilesMap[segID] = &clusteringpb.InsertFiles{InsertFiles: insertFiles}
+		segmentInsertFilesMap[segID] = &clusteringpb.InsertFiles{
+			InsertFiles:  insertFiles,
+			ManifestPath: stats.GetManifestPath(),
+		}
 	}
 
 	field := at.req.GetField()
@@ -145,21 +148,23 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 	}
 
 	analyzeInfo := &clusteringpb.AnalyzeInfo{
-		ClusterID:       at.req.GetClusterID(),
-		BuildID:         at.req.GetTaskID(),
-		CollectionID:    at.req.GetCollectionID(),
-		PartitionID:     at.req.GetPartitionID(),
-		Version:         at.req.GetVersion(),
-		Dim:             at.req.GetDim(),
-		StorageConfig:   storageConfig,
-		NumClusters:     at.req.GetNumClusters(),
-		TrainSize:       int64(float64(hardware.GetMemoryCount()) * at.req.GetMaxTrainSizeRatio()),
-		MinClusterRatio: at.req.GetMinClusterSizeRatio(),
-		MaxClusterRatio: at.req.GetMaxClusterSizeRatio(),
-		MaxClusterSize:  at.req.GetMaxClusterSize(),
-		NumRows:         numRowsMap,
-		InsertFiles:     segmentInsertFilesMap,
-		FieldSchema:     field,
+		ClusterID:             at.req.GetClusterID(),
+		BuildID:               at.req.GetTaskID(),
+		CollectionID:          at.req.GetCollectionID(),
+		PartitionID:           at.req.GetPartitionID(),
+		Version:               at.req.GetVersion(),
+		Dim:                   at.req.GetDim(),
+		StorageConfig:         storageConfig,
+		NumClusters:           at.req.GetNumClusters(),
+		TrainSize:             int64(float64(hardware.GetMemoryCount()) * at.req.GetMaxTrainSizeRatio()),
+		MinClusterRatio:       at.req.GetMinClusterSizeRatio(),
+		MaxClusterRatio:       at.req.GetMaxClusterSizeRatio(),
+		MaxClusterSize:        at.req.GetMaxClusterSize(),
+		NumRows:               numRowsMap,
+		InsertFiles:           segmentInsertFilesMap,
+		FieldSchema:           field,
+		StorageVersion:        at.req.GetStorageVersion(),
+		ExternalCentroidsPath: at.req.GetExternalCentroidsPath(),
 	}
 
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)

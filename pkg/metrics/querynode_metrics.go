@@ -463,6 +463,64 @@ var (
 			segmentPruneLabelName,
 		})
 
+	QueryNodeAdaptiveSearchTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "adaptive_search_total",
+			Help:      "adaptive search invocations by outcome",
+		},
+		[]string{nodeIDLabelName, collectionIDLabelName, "result"})
+
+	QueryNodeAdaptiveBatches = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "adaptive_batches",
+			Help:      "number of batches executed per adaptive search query",
+			Buckets:   []float64{1, 2, 3, 4, 6, 8, 12, 16, 32},
+		},
+		[]string{nodeIDLabelName, collectionIDLabelName})
+
+	QueryNodeAdaptivePrunedSegments = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "adaptive_pruned_segments",
+			Help:      "segments skipped by adaptive early termination",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
+		},
+		[]string{nodeIDLabelName, collectionIDLabelName})
+
+	QueryNodeAdaptiveBatchLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "adaptive_batch_latency",
+			Help:      "adaptive search per-batch latency in ms",
+			Buckets:   buckets,
+		},
+		[]string{nodeIDLabelName, collectionIDLabelName, "batch_idx_bucket"})
+
+	QueryNodeAdaptiveE2ELatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "adaptive_e2e_latency",
+			Help:      "adaptive search end-to-end latency in ms",
+			Buckets:   buckets,
+		},
+		[]string{nodeIDLabelName, collectionIDLabelName})
+
+	QueryNodeAdaptiveConvergeReason = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "adaptive_converge_reason",
+			Help:      "adaptive search termination cause distribution",
+		},
+		[]string{nodeIDLabelName, "reason"})
+
 	QueryNodeEvictedReadReqCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -994,6 +1052,12 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSegmentPruneRatio)
 	registry.MustRegister(QueryNodeSegmentPruneLatency)
 	registry.MustRegister(QueryNodeSegmentPruneBias)
+	registry.MustRegister(QueryNodeAdaptiveSearchTotal)
+	registry.MustRegister(QueryNodeAdaptiveBatches)
+	registry.MustRegister(QueryNodeAdaptivePrunedSegments)
+	registry.MustRegister(QueryNodeAdaptiveBatchLatency)
+	registry.MustRegister(QueryNodeAdaptiveE2ELatency)
+	registry.MustRegister(QueryNodeAdaptiveConvergeReason)
 	registry.MustRegister(QueryNodeApplyBFCost)
 	registry.MustRegister(QueryNodeForwardDeleteCost)
 	registry.MustRegister(QueryNodeSearchHitSegmentNum)
@@ -1037,6 +1101,11 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 	QueryNodeSegmentPruneRatio.DeletePartialMatch(labels)
 	QueryNodeSegmentPruneBias.DeletePartialMatch(labels)
 	QueryNodeSegmentPruneLatency.DeletePartialMatch(labels)
+	QueryNodeAdaptiveSearchTotal.DeletePartialMatch(labels)
+	QueryNodeAdaptiveBatches.DeletePartialMatch(labels)
+	QueryNodeAdaptivePrunedSegments.DeletePartialMatch(labels)
+	QueryNodeAdaptiveBatchLatency.DeletePartialMatch(labels)
+	QueryNodeAdaptiveE2ELatency.DeletePartialMatch(labels)
 	QueryNodeLevelZeroSize.DeletePartialMatch(labels)
 	QueryNodeTwoStageFilterLatency.DeletePartialMatch(labels)
 	QueryNodeTwoStageSearchLatency.DeletePartialMatch(labels)

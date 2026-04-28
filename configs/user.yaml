@@ -1,0 +1,16 @@
+etcd:
+  endpoints:
+    - localhost:22750
+  rootPath: by-dev-adaptive
+minio:
+  address: localhost
+  port: 22751
+  rootPath: files-adaptive
+localStorage:
+  path: /home/fox/Work/milvus_asan_data/
+rocksmq:
+  path: /home/fox/Work/milvus_asan_data/rdb_data
+common:
+  storage:
+    analyzer:
+      local_resource_path: /home/fox/Work/milvus_asan_data/analyzer

@@ -30,6 +30,7 @@
 #include "storage/StorageV2FSCache.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/util.h"
 #include "type_c.h"
 
 using namespace milvus;
@@ -113,6 +114,16 @@ Analyze(CAnalyze* res_analyze,
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
 
+        // Set up loon FFI properties for storage v2/v3 so KmeansClustering can
+        // resolve segment data through per-segment manifests instead of
+        // reconstructing legacy binlog paths from log IDs.
+        if (analyze_info->storage_version() >= ::STORAGE_V2) {
+            auto loon_properties =
+                MakeInternalPropertiesFromStorageConfig(
+                    ToCStorageConfig(storage_config));
+            fileManagerContext.set_loon_ffi_properties(loon_properties);
+        }
+
         if (field_type != DataType::VECTOR_FLOAT) {
             throw SegcoreError(
                 DataTypeInvalid,
@@ -176,11 +187,11 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                    "was null");
         auto real_analyze =
             reinterpret_cast<milvus::clustering::KmeansClustering*>(analyze);
-        auto res = real_analyze->GetClusteringResultMeta();
-        *centroid_path = res.centroid_path.data();
+        const auto& res = real_analyze->GetClusteringResultMeta();
+        *centroid_path = const_cast<char*>(res.centroid_path.data());
         *centroid_file_size = res.centroid_file_size;
 
-        auto& map_ = res.id_mappings;
+        const auto& map_ = res.id_mappings;
         const char** id_mapping_paths_ = (const char**)id_mapping_paths;
         size_t i = 0;
         for (auto it = map_.begin(); it != map_.end(); ++it, i++) {

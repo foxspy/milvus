@@ -571,6 +571,10 @@ queryNode:
     topKMergeRatio: 20
   search:
     enableResultZeroCopy: false # When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.
+  # Adaptive search (order-based batched execution)
+  adaptiveSearch:
+    enabled: true
+    batchSize: auto
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
@@ -581,7 +585,7 @@ queryNode:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-  enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
+  enableSegmentPrune: true # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return min batch size of stream query
   queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
   enableSegmentFilter: true # Enable delegator-side segment filtering using PK predicates (min/max + bloom filter).
@@ -674,7 +678,7 @@ dataCoord:
   compaction:
     # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
-    enableAutoCompaction: true
+    enableAutoCompaction: false
     indexBasedCompaction: true
     # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
@@ -710,7 +714,7 @@ dataCoord:
         maxsize: 10485760 # The expired log size of a segment to trigger a compaction, default as 10MB
     clustering:
       enable: true # Enable clustering compaction
-      autoEnable: false # Enable auto clustering compaction
+      autoEnable: true # Enable auto clustering compaction
       triggerInterval: 600 # clustering compaction trigger interval in seconds
       minInterval: 3600 # The minimum interval between clustering compaction executions of one collection, to avoid redundant compaction
       maxInterval: 259200 # If a collection haven't been clustering compacted for longer than maxInterval, force compact
@@ -966,7 +970,7 @@ common:
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   parquetStatsSkipIndex:
     enabled: false # whether to skip parquet stats index when reading; set true to enable skipping.
-  storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
+  storageType: remote # using docker-compose-deps.yml MinIO 2024
   storage:
     manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
     stv2:
@@ -1040,7 +1044,7 @@ common:
   bloomFilterApplyBatchSize: 1000 # batch size when to apply pk to bloom filter
   usePartitionKeyAsClusteringKey: false # if true, do clustering compaction and segment prune on partition key field
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
-  enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
+  enableVectorClusteringKey: true # if true, enable vector clustering key and vector clustering compaction
   localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
   # Prefer IPv6 addresses when automatically selecting the local IP.
   # If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.

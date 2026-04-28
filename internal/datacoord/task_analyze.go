@@ -178,9 +178,14 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		totalSegmentsRows += info.GetNumOfRows()
 		binlogIDs := getBinLogIDs(info, task.FieldID)
 		req.SegmentStats[segID] = &indexpb.SegmentStats{
-			ID:      segID,
-			NumRows: info.GetNumOfRows(),
-			LogIDs:  binlogIDs,
+			ID:           segID,
+			NumRows:      info.GetNumOfRows(),
+			LogIDs:       binlogIDs,
+			ManifestPath: info.GetManifestPath(),
+		}
+		// Take storage_version from any segment (all segments in a collection share the same version).
+		if req.StorageVersion == 0 {
+			req.StorageVersion = info.GetStorageVersion()
 		}
 	}
 
@@ -195,10 +200,22 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 				}
 				req.Dim = int64(dim)
 
+				// External-centroids path supplies num_clusters from the file
+				// header; skip the size-derived minimum check.
+				hasExternalCentroids := false
+				if at.schema != nil {
+					for _, prop := range at.schema.GetProperties() {
+						if prop.GetKey() == "clustering.externalCentroidsPath" && prop.GetValue() != "" {
+							hasExternalCentroids = true
+							break
+						}
+					}
+				}
+
 				// Calculate the number of clusters based on total data size.
 				totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(dim) * typeutil.VectorTypeSize(task.FieldType)
 				numClusters := int64(math.Ceil(totalSegmentsRawDataSize / (Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())))
-				if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
+				if !hasExternalCentroids && numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
 					log.Info("data size is too small, skip analyze task",
 						zap.Float64("raw data size", totalSegmentsRawDataSize),
 						zap.Int64("num clusters", numClusters),
@@ -220,6 +237,19 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
 	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 	req.TaskSlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
+
+	// Optional: external pre-computed centroids path. When set via collection
+	// property `clustering.externalCentroidsPath`, analyze skips kmeans Fit.
+	if at.schema != nil {
+		for _, prop := range at.schema.GetProperties() {
+			if prop.GetKey() == "clustering.externalCentroidsPath" {
+				req.ExternalCentroidsPath = prop.GetValue()
+				log.Info("analyze task will use external centroids",
+					zap.String("path", req.ExternalCentroidsPath))
+				break
+			}
+		}
+	}
 
 	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 

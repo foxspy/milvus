@@ -28,6 +28,9 @@ message StorageConfig {
 
 message InsertFiles {
   repeated string insert_files = 1;
+  // StorageV2 manifest file path for this segment. When present, C++ side resolves
+  // binlog paths from the manifest rather than the legacy insert_files list.
+  string manifest_path = 2;
 }
 
 message AnalyzeInfo {
@@ -47,6 +50,16 @@ message AnalyzeInfo {
   map<int64, int64> num_rows = 14;
   schema.FieldSchema field_schema = 15;
   StorageConfig storage_config = 16;
+  // Storage version: 0=V1(legacy binlog), 2=V2(packed parquet), 3=V3(loon manifest).
+  // When >= 2, KmeansClustering reads raw data via per-segment manifest paths
+  // instead of the legacy insert_files list.
+  int64 storage_version = 17;
+  // Optional: minio object path to a pre-computed centroids file.
+  // When non-empty, analyze skips the kmeans Fit step, loads centroids from
+  // this file via ClusterNode::SetCentroids, and runs streaming assign for
+  // every segment (no trained_segments_num shortcut).
+  // File format (simple binary): int32 n_clusters | int32 dim | float32[n×dim]
+  string external_centroids_path = 18;
 }
 
 message ClusteringCentroidsStats {
