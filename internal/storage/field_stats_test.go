@@ -691,7 +691,8 @@ func TestVectorFieldStatsMarshal(t *testing.T) {
 
 	stats2, err := NewFieldStats(1, schemapb.DataType_FloatVector, 1)
 	assert.NoError(t, err)
-	stats2.UnmarshalJSON(bytes)
+	err = stats2.UnmarshalJSON(bytes)
+	assert.NoError(t, err)
 	assert.Equal(t, 1, len(stats2.Centroids))
 	assert.ElementsMatch(t, []VectorFieldValue{centroid}, stats2.Centroids)
 
@@ -705,7 +706,8 @@ func TestVectorFieldStatsMarshal(t *testing.T) {
 
 	stats4, err := NewFieldStats(1, schemapb.DataType_FloatVector, 2)
 	assert.NoError(t, err)
-	stats4.UnmarshalJSON(bytes2)
+	err = stats4.UnmarshalJSON(bytes2)
+	assert.NoError(t, err)
 	assert.Equal(t, 2, len(stats4.Centroids))
 	assert.ElementsMatch(t, []VectorFieldValue{centroid, centroid2}, stats4.Centroids)
 }

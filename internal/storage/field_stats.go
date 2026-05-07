@@ -173,38 +173,36 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 			stats.BF = bf
 		}
 	} else {
-		stats.initCentroids(data, stats.Type)
-		err = json.Unmarshal(*messageMap["centroids"], &stats.Centroids)
-		if err != nil {
-			return err
+		if value, ok := messageMap["centroids"]; ok && value != nil {
+			if err := stats.unmarshalCentroids(*value, stats.Type); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func (stats *FieldStats) initCentroids(data []byte, dataType schemapb.DataType) {
-	type FieldStatsAux struct {
-		FieldID   int64                            `json:"fieldID"`
-		Type      schemapb.DataType                `json:"type"`
-		Max       json.RawMessage                  `json:"max"`
-		Min       json.RawMessage                  `json:"min"`
-		BF        bloomfilter.BloomFilterInterface `json:"bf"`
-		Centroids []json.RawMessage                `json:"centroids"`
+func (stats *FieldStats) unmarshalCentroids(data []byte, dataType schemapb.DataType) error {
+	var centroids []json.RawMessage
+	if err := json.Unmarshal(data, &centroids); err != nil {
+		return err
 	}
-	// Unmarshal JSON into the auxiliary struct
-	var aux FieldStatsAux
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return
-	}
-	for i := 0; i < len(aux.Centroids); i++ {
+
+	stats.Centroids = make([]VectorFieldValue, 0, len(centroids))
+	for _, centroidBytes := range centroids {
 		switch dataType {
 		case schemapb.DataType_FloatVector:
-			stats.Centroids = append(stats.Centroids, &FloatVectorFieldValue{})
+			centroid := &FloatVectorFieldValue{}
+			if err := json.Unmarshal(centroidBytes, centroid); err != nil {
+				return err
+			}
+			stats.Centroids = append(stats.Centroids, centroid)
 		default:
-			// other vector datatype
+			return errors.Newf("unsupported vector data type: %s", dataType.String())
 		}
 	}
+	return nil
 }
 
 func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {

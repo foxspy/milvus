@@ -75,3 +75,29 @@ func TestPartitionStats(t *testing.T) {
 	assert.Equal(t, 1, len(desPartStats.SegmentStats))
 	assert.Equal(t, 2, len(desPartStats.SegmentStats[1].FieldStats))
 }
+
+func TestPartitionStatsWithVectorCentroids(t *testing.T) {
+	partStats := NewPartitionStatsSnapshot()
+	centroid1 := NewFloatVectorFieldValue([]float32{1.0, 2.0, 3.0, 4.0})
+	centroid2 := NewFloatVectorFieldValue([]float32{5.0, 6.0, 7.0, 8.0})
+
+	fieldStats, err := NewFieldStats(102, schemapb.DataType_FloatVector, 2)
+	assert.NoError(t, err)
+	fieldStats.SetVectorCentroids(centroid1, centroid2)
+	partStats.UpdateSegmentStats(1000, SegmentStats{
+		FieldStats: []FieldStats{fieldStats.Clone()},
+		NumRows:    100,
+	})
+
+	partBytes, err := SerializePartitionStatsSnapshot(partStats)
+	assert.NoError(t, err)
+
+	desPartStats, err := DeserializePartitionsStatsSnapshot(partBytes)
+	assert.NoError(t, err)
+	assert.NotNil(t, desPartStats)
+
+	segmentStats := desPartStats.SegmentStats[1000]
+	assert.Equal(t, 1, len(segmentStats.FieldStats))
+	assert.Equal(t, 2, len(segmentStats.FieldStats[0].Centroids))
+	assert.ElementsMatch(t, []VectorFieldValue{centroid1, centroid2}, segmentStats.FieldStats[0].Centroids)
+}
