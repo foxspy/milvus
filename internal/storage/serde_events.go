@@ -153,15 +153,20 @@ func newIterativeCompositeBinlogRecordReader(
 }
 
 func ValueDeserializerWithSelectedFields(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema, shouldCopy bool) error {
-	return valueDeserializer(r, v, fieldSchema, shouldCopy)
+	return valueDeserializer(r, v, fieldSchema, shouldCopy, true)
+}
+
+// ValueDeserializerWithSelectedFieldsOptionalRowID deserializes records that may not contain RowID, such as manifest records.
+func ValueDeserializerWithSelectedFieldsOptionalRowID(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema, shouldCopy bool) error {
+	return valueDeserializer(r, v, fieldSchema, shouldCopy, false)
 }
 
 func ValueDeserializerWithSchema(r Record, v []*Value, schema *schemapb.CollectionSchema, shouldCopy bool) error {
 	allFields := typeutil.GetAllFieldSchemas(schema)
-	return valueDeserializer(r, v, allFields, shouldCopy)
+	return valueDeserializer(r, v, allFields, shouldCopy, true)
 }
 
-func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, shouldCopy bool) error {
+func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, shouldCopy bool, requireRowID bool) error {
 	pkField := func() *schemapb.FieldSchema {
 		for _, field := range fields {
 			if field.GetIsPrimaryKey() {
@@ -213,7 +218,7 @@ func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, sho
 		}
 
 		rowID, ok := m[common.RowIDField].(int64)
-		if !ok {
+		if !ok && requireRowID {
 			return merr.WrapErrIoKeyNotFound("no row id column found")
 		}
 		value.ID = rowID

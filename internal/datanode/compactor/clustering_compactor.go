@@ -353,7 +353,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
-			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+			t.plan.GetMaxSize(), t.getWriterSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
 			t.getWriterOpts()...,
 		)
@@ -376,7 +376,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
-			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+			t.plan.GetMaxSize(), t.getWriterSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
 			t.getWriterOpts()...,
 		)
@@ -436,7 +436,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
-			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+			t.plan.GetMaxSize(), t.getWriterSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
 			t.getWriterOpts()...,
 		)
@@ -650,6 +650,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	defer rr.Close()
 
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
+	deserializeFields := typeutil.GetAllFieldSchemas(t.getWriterSchema())
 
 	offset := int64(-1)
 	for {
@@ -663,7 +664,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		}
 
 		vs := make([]*storage.Value, r.Len())
-		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, true); err != nil {
+		if err = storage.ValueDeserializerWithSelectedFieldsOptionalRowID(r, vs, deserializeFields, true); err != nil {
 			log.Warn("compact wrong, failed to deserialize data", zap.Error(err))
 			return err
 		}
@@ -924,7 +925,11 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	if t.ttlFieldID >= common.StartOfUserFieldID {
 		requiredFields.Insert(t.ttlFieldID)
 	}
-	selectedFields := lo.Filter(t.plan.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+	analyzeSchema := t.plan.GetSchema()
+	if t.compactionParams.StorageVersion == storage.StorageV3 {
+		analyzeSchema = storage.FilterRowIDFromSchema(analyzeSchema)
+	}
+	selectedFields := lo.Filter(typeutil.GetAllFieldSchemas(analyzeSchema), func(field *schemapb.FieldSchema, _ int) bool {
 		return requiredFields.Contain(field.GetFieldID())
 	})
 
@@ -976,7 +981,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 
 	pkIter := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
-		return storage.ValueDeserializerWithSelectedFields(r, v, selectedFields, true)
+		return storage.ValueDeserializerWithSelectedFieldsOptionalRowID(r, v, selectedFields, true)
 	})
 	defer pkIter.Close()
 	analyzeResult, remained, err := t.iterAndGetScalarAnalyzeResult(pkIter, expiredFilter)
@@ -1108,6 +1113,13 @@ func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 
 func (t *clusteringCompactionTask) GetStorageConfig() *indexpb.StorageConfig {
 	return t.compactionParams.StorageConfig
+}
+
+func (t *clusteringCompactionTask) getWriterSchema() *schemapb.CollectionSchema {
+	if t.compactionParams.StorageVersion == storage.StorageV3 {
+		return storage.FilterRowIDFromSchema(t.plan.GetSchema())
+	}
+	return t.plan.GetSchema()
 }
 
 // getWriterOpts returns common writer options for all cluster buffer writers.

@@ -148,6 +148,19 @@ func (s *ClusteringCompactionTaskSuite) TestIsVectorClusteringKey() {
 	s.Equal(true, s.task.isVectorClusteringKey)
 }
 
+func (s *ClusteringCompactionTaskSuite) TestGetWriterSchemaForStorageV3() {
+	s.task.plan.Schema = genCollectionSchema()
+	s.task.compactionParams.StorageVersion = storage.StorageV3
+
+	writerSchema := s.task.getWriterSchema()
+	fieldIDs := lo.Map(typeutil.GetAllFieldSchemas(writerSchema), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	})
+	s.NotContains(fieldIDs, common.RowIDField)
+	s.Contains(fieldIDs, common.TimeStampField)
+	s.Contains(fieldIDs, int64(100))
+}
+
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithEmptyBinlog() {
 	s.task.plan.Schema = genCollectionSchema()
 	s.task.plan.ClusteringKeyField = 100

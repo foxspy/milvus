@@ -141,6 +141,39 @@ func TestBinlogStreamWriter(t *testing.T) {
 	})
 }
 
+func TestValueDeserializerWithSelectedFieldsOptionalRowID(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+		},
+	}
+	filteredSchema := FilterRowIDFromSchema(schema)
+	rec, err := ValueSerializer([]*Value{
+		{
+			PK:        NewInt64PrimaryKey(10),
+			Timestamp: 20,
+			Value: map[FieldID]any{
+				common.TimeStampField: int64(20),
+				100:                   int64(10),
+				101:                   int64(30),
+			},
+		},
+	}, filteredSchema)
+	assert.NoError(t, err)
+	defer rec.Release()
+
+	values := make([]*Value, rec.Len())
+	err = ValueDeserializerWithSelectedFieldsOptionalRowID(rec, values, filteredSchema.GetFields(), true)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), values[0].ID)
+	assert.Equal(t, int64(20), values[0].Timestamp)
+	assert.Equal(t, NewInt64PrimaryKey(10), values[0].PK)
+	assert.Equal(t, int64(30), values[0].Value.(map[FieldID]interface{})[101])
+}
+
 func TestBinlogSerializeWriter(t *testing.T) {
 	t.Run("test write value", func(t *testing.T) {
 		size := 100
