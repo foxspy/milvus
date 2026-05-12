@@ -30,14 +30,14 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/delegator/adaptive"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/clustering"
+	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/internal/querynodev2/delegator/adaptive"
-	"github.com/milvus-io/milvus/internal/util/clustering"
-	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -204,6 +204,10 @@ func (sd *shardDelegator) adaptiveSearch(
 		if err != nil {
 			return nil, err
 		}
+		log.Info("adaptive search pre-batch result topk",
+			zap.Int("result_messages", len(preBatchResults)),
+			zap.Int("scores", searchResultsScoreCount(preBatchResults)),
+			zap.String("topk_summary", summarizeSearchResultsTopKScores(preBatchResults, metricType, int(req.GetReq().GetNq()), int(req.GetReq().GetTopk()), 3, 5)))
 		allResults = append(allResults, preBatchResults...)
 	}
 
@@ -217,6 +221,16 @@ func (sd *shardDelegator) adaptiveSearch(
 	// Seed with pre-batch results so running top-K reflects everything seen.
 	if len(allResults) > 0 {
 		runHeap.merge(allResults)
+		if thresholds, full := runHeap.thresholds(); full {
+			log.Info("adaptive search pre-batch threshold",
+				zap.Int("result_messages", len(allResults)),
+				zap.Int("scores", searchResultsScoreCount(allResults)),
+				zap.String("threshold_summary", summarizeAdaptiveThresholds(thresholds, metricType)))
+		} else {
+			log.Info("adaptive search pre-batch threshold not ready",
+				zap.Int("result_messages", len(allResults)),
+				zap.Int("scores", searchResultsScoreCount(allResults)))
+		}
 	}
 
 	batchSizeCfg := paramtable.Get().QueryNodeCfg.AdaptiveSearchBatchSize.GetValue()
@@ -242,9 +256,21 @@ func (sd *shardDelegator) adaptiveSearch(
 		// cardinal PruneControl fields so the graph-search index can
 		// early-stop candidates that can't beat the current top-K floor.
 		batchReq := req
+		pruneControlEnabled := false
+		pruneThresholdSummary := ""
 		if currentThr, full := runHeap.thresholds(); full {
 			batchReq = cloneReqWithPruneControl(req, currentThr, metricType)
+			pruneControlEnabled = batchReq != req
+			pruneThresholdSummary = summarizeAdaptiveThresholds(currentThr, metricType)
 		}
+		log.Info("adaptive search dispatch batch",
+			zap.Int("batch", batches),
+			zap.Int("segment_start", i),
+			zap.Int("segment_end", end),
+			zap.Int("segment_count", len(batchSegIDs)),
+			zap.Int("remaining_after_batch", len(orderedSegIDs)-end),
+			zap.Bool("prune_control_enabled", pruneControlEnabled),
+			zap.String("prune_threshold_summary", pruneThresholdSummary))
 
 		_, batchSpan := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("adaptive.batch[%d]", batches))
 		batchSpan.SetAttributes(attribute.Int("segment_count", len(batchSegIDs)))
@@ -253,6 +279,11 @@ func (sd *shardDelegator) adaptiveSearch(
 		if err != nil {
 			return nil, err
 		}
+		log.Info("adaptive search batch result topk",
+			zap.Int("batch", batches),
+			zap.Int("result_messages", len(batchResults)),
+			zap.Int("scores", searchResultsScoreCount(batchResults)),
+			zap.String("topk_summary", summarizeSearchResultsTopKScores(batchResults, metricType, int(nq), int(topK), 3, 5)))
 		allResults = append(allResults, batchResults...)
 		batches++
 
@@ -261,9 +292,22 @@ func (sd *shardDelegator) adaptiveSearch(
 		thresholds, heapFull := runHeap.thresholds()
 		if !heapFull {
 			// Heap not full yet — no meaningful threshold; skip convergence.
+			log.Info("adaptive search batch threshold not ready",
+				zap.Int("batch", batches-1),
+				zap.Int("result_messages", len(batchResults)),
+				zap.Int("scores", searchResultsScoreCount(batchResults)))
 			continue
 		}
 		converged, reason := converger.Check(thresholds, len(batchResults), batches-1)
+		log.Info("adaptive search batch threshold",
+			zap.Int("batch", batches-1),
+			zap.Int("batches", batches),
+			zap.Int("result_messages", len(batchResults)),
+			zap.Int("scores", searchResultsScoreCount(batchResults)),
+			zap.String("threshold_summary", summarizeAdaptiveThresholds(thresholds, metricType)),
+			zap.Bool("converged", converged),
+			zap.String("reason", reason),
+			zap.Int("pruned_if_stop", len(orderedSegIDs)-end))
 		if converged {
 			pruned := len(orderedSegIDs) - end
 			log.Info("adaptive search converged",
@@ -307,6 +351,197 @@ func (sd *shardDelegator) adaptiveSearch(
 		fmt.Sprint(sd.collectionID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return allResults, nil
+}
+
+func summarizeAdaptiveThresholds(thresholds []float32, metric string) string {
+	if len(thresholds) == 0 {
+		return ""
+	}
+	internalMin, internalMax := thresholds[0], thresholds[0]
+	internalSum := float64(0)
+	userMin, userMax := adaptiveUserThreshold(thresholds[0], metric), adaptiveUserThreshold(thresholds[0], metric)
+	userSum := float64(0)
+	for _, threshold := range thresholds {
+		if threshold < internalMin {
+			internalMin = threshold
+		}
+		if threshold > internalMax {
+			internalMax = threshold
+		}
+		internalSum += float64(threshold)
+
+		userThreshold := adaptiveUserThreshold(threshold, metric)
+		if userThreshold < userMin {
+			userMin = userThreshold
+		}
+		if userThreshold > userMax {
+			userMax = userThreshold
+		}
+		userSum += float64(userThreshold)
+	}
+	return fmt.Sprintf("metric=%s internal_min=%.6f internal_max=%.6f internal_avg=%.6f user_min=%.6f user_max=%.6f user_avg=%.6f",
+		metric,
+		internalMin,
+		internalMax,
+		internalSum/float64(len(thresholds)),
+		userMin,
+		userMax,
+		userSum/float64(len(thresholds)))
+}
+
+func adaptiveUserThreshold(threshold float32, metric string) float32 {
+	switch strings.ToUpper(metric) {
+	case "IP", "COSINE", "BM25":
+		return threshold
+	default:
+		return -threshold
+	}
+}
+
+func searchResultsScoreCount(results []*internalpb.SearchResults) int {
+	count := 0
+	for _, result := range results {
+		if result == nil || result.GetResultData() == nil {
+			continue
+		}
+		count += len(result.GetResultData().GetScores())
+	}
+	return count
+}
+
+type adaptiveResultTopKSummary struct {
+	ResultIndex int                        `json:"result_index"`
+	NQ          int                        `json:"nq"`
+	ScoreCount  int                        `json:"score_count"`
+	Queries     []adaptiveQueryTopKSummary `json:"queries"`
+}
+
+type adaptiveQueryTopKSummary struct {
+	QueryIndex          int       `json:"query_index"`
+	TopK                int       `json:"topk"`
+	ScoreBest           float32   `json:"score_best"`
+	ScoreWorst          float32   `json:"score_worst"`
+	ScoreMedian         float32   `json:"score_median"`
+	ScoreHead           []float32 `json:"score_head"`
+	ScoreTail           []float32 `json:"score_tail"`
+	CosineDistanceBest  *float32  `json:"cosine_distance_best,omitempty"`
+	CosineDistanceWorst *float32  `json:"cosine_distance_worst,omitempty"`
+	CosineDistanceHead  []float32 `json:"cosine_distance_head,omitempty"`
+	CosineDistanceTail  []float32 `json:"cosine_distance_tail,omitempty"`
+}
+
+func summarizeSearchResultsTopKScores(results []*internalpb.SearchResults, metric string, reqNQ int, reqTopK int, maxQueries int, maxScores int) string {
+	if len(results) == 0 {
+		return "[]"
+	}
+	summaries := make([]adaptiveResultTopKSummary, 0, len(results))
+	for resultIdx, result := range results {
+		if result == nil || result.GetResultData() == nil {
+			continue
+		}
+		data := result.GetResultData()
+		scores := data.GetScores()
+		topks := data.GetTopks()
+		nq := len(topks)
+		if nq == 0 {
+			nq = reqNQ
+		}
+		if nq <= 0 {
+			continue
+		}
+
+		summary := adaptiveResultTopKSummary{
+			ResultIndex: resultIdx,
+			NQ:          nq,
+			ScoreCount:  len(scores),
+			Queries:     make([]adaptiveQueryTopKSummary, 0, minInt(nq, maxQueries)),
+		}
+		offset := 0
+		for queryIdx := 0; queryIdx < nq && queryIdx < maxQueries; queryIdx++ {
+			queryTopK := reqTopK
+			if queryIdx < len(topks) {
+				queryTopK = int(topks[queryIdx])
+			}
+			if queryTopK <= 0 {
+				continue
+			}
+			end := offset + queryTopK
+			if end > len(scores) {
+				end = len(scores)
+			}
+			if offset >= end {
+				break
+			}
+
+			queryScores := scores[offset:end]
+			querySummary := adaptiveQueryTopKSummary{
+				QueryIndex:  queryIdx,
+				TopK:        len(queryScores),
+				ScoreBest:   roundAdaptiveScore(queryScores[0]),
+				ScoreWorst:  roundAdaptiveScore(queryScores[len(queryScores)-1]),
+				ScoreMedian: roundAdaptiveScore(queryScores[len(queryScores)/2]),
+				ScoreHead:   roundAdaptiveScores(headFloat32(queryScores, maxScores)),
+				ScoreTail:   roundAdaptiveScores(tailFloat32(queryScores, maxScores)),
+			}
+			if strings.EqualFold(metric, "COSINE") {
+				best := roundAdaptiveScore(1 - queryScores[0])
+				worst := roundAdaptiveScore(1 - queryScores[len(queryScores)-1])
+				querySummary.CosineDistanceBest = &best
+				querySummary.CosineDistanceWorst = &worst
+				querySummary.CosineDistanceHead = roundAdaptiveDistances(headFloat32(queryScores, maxScores))
+				querySummary.CosineDistanceTail = roundAdaptiveDistances(tailFloat32(queryScores, maxScores))
+			}
+			summary.Queries = append(summary.Queries, querySummary)
+			offset += queryTopK
+		}
+		summaries = append(summaries, summary)
+	}
+	bytes, err := json.Marshal(summaries)
+	if err != nil {
+		return fmt.Sprintf("marshal_error=%v", err)
+	}
+	return string(bytes)
+}
+
+func headFloat32(values []float32, n int) []float32 {
+	if n <= 0 || len(values) <= n {
+		return values
+	}
+	return values[:n]
+}
+
+func tailFloat32(values []float32, n int) []float32 {
+	if n <= 0 || len(values) <= n {
+		return values
+	}
+	return values[len(values)-n:]
+}
+
+func roundAdaptiveScores(values []float32) []float32 {
+	rounded := make([]float32, 0, len(values))
+	for _, value := range values {
+		rounded = append(rounded, roundAdaptiveScore(value))
+	}
+	return rounded
+}
+
+func roundAdaptiveDistances(scores []float32) []float32 {
+	distances := make([]float32, 0, len(scores))
+	for _, score := range scores {
+		distances = append(distances, roundAdaptiveScore(1-score))
+	}
+	return distances
+}
+
+func roundAdaptiveScore(value float32) float32 {
+	return float32(math.Round(float64(value)*1e6) / 1e6)
+}
+
+func minInt(left int, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 // orderSegments uses partition stats centroids to order segments by distance.
