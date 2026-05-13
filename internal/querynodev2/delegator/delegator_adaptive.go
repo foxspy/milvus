@@ -118,6 +118,7 @@ func (sd *shardDelegator) adaptiveSearch(
 	defer rootSpan.End()
 
 	log := sd.getLogger(ctx)
+	debugEnabled := log.Core().Enabled(zap.DebugLevel)
 	tr := timerecord.NewTimeRecorder("adaptiveSearch")
 
 	// 1. Extract query vector + clustering info from request.
@@ -207,10 +208,12 @@ func (sd *shardDelegator) adaptiveSearch(
 		if err := decodeAdaptiveSearchResults(preBatchResults); err != nil {
 			return nil, err
 		}
-		log.Info("adaptive search pre-batch result topk",
-			zap.Int("result_messages", len(preBatchResults)),
-			zap.Int("scores", searchResultsScoreCount(preBatchResults)),
-			zap.String("topk_summary", summarizeSearchResultsTopKScores(preBatchResults, metricType, int(req.GetReq().GetNq()), int(req.GetReq().GetTopk()), 3, 5)))
+		if debugEnabled {
+			log.Debug("adaptive search pre-batch result topk",
+				zap.Int("result_messages", len(preBatchResults)),
+				zap.Int("scores", searchResultsScoreCount(preBatchResults)),
+				zap.String("topk_summary", summarizeSearchResultsTopKScores(preBatchResults, metricType, int(req.GetReq().GetNq()), int(req.GetReq().GetTopk()), 3, 5)))
+		}
 		allResults = append(allResults, preBatchResults...)
 	}
 
@@ -224,15 +227,17 @@ func (sd *shardDelegator) adaptiveSearch(
 	// Seed with pre-batch results so running top-K reflects everything seen.
 	if len(allResults) > 0 {
 		runHeap.merge(allResults)
-		if thresholds, full := runHeap.thresholds(); full {
-			log.Info("adaptive search pre-batch threshold",
-				zap.Int("result_messages", len(allResults)),
-				zap.Int("scores", searchResultsScoreCount(allResults)),
-				zap.String("threshold_summary", summarizeAdaptiveThresholds(thresholds, metricType)))
-		} else {
-			log.Info("adaptive search pre-batch threshold not ready",
-				zap.Int("result_messages", len(allResults)),
-				zap.Int("scores", searchResultsScoreCount(allResults)))
+		if debugEnabled {
+			if thresholds, full := runHeap.thresholds(); full {
+				log.Debug("adaptive search pre-batch threshold",
+					zap.Int("result_messages", len(allResults)),
+					zap.Int("scores", searchResultsScoreCount(allResults)),
+					zap.String("threshold_summary", summarizeAdaptiveThresholds(thresholds, metricType)))
+			} else {
+				log.Debug("adaptive search pre-batch threshold not ready",
+					zap.Int("result_messages", len(allResults)),
+					zap.Int("scores", searchResultsScoreCount(allResults)))
+			}
 		}
 	}
 
@@ -264,16 +269,20 @@ func (sd *shardDelegator) adaptiveSearch(
 		if currentThr, full := runHeap.thresholds(); full {
 			batchReq = cloneReqWithPruneControl(req, currentThr, metricType)
 			pruneControlEnabled = batchReq != req
-			pruneThresholdSummary = summarizeAdaptiveThresholds(currentThr, metricType)
+			if debugEnabled {
+				pruneThresholdSummary = summarizeAdaptiveThresholds(currentThr, metricType)
+			}
 		}
-		log.Info("adaptive search dispatch batch",
-			zap.Int("batch", batches),
-			zap.Int("segment_start", i),
-			zap.Int("segment_end", end),
-			zap.Int("segment_count", len(batchSegIDs)),
-			zap.Int("remaining_after_batch", len(orderedSegIDs)-end),
-			zap.Bool("prune_control_enabled", pruneControlEnabled),
-			zap.String("prune_threshold_summary", pruneThresholdSummary))
+		if debugEnabled {
+			log.Debug("adaptive search dispatch batch",
+				zap.Int("batch", batches),
+				zap.Int("segment_start", i),
+				zap.Int("segment_end", end),
+				zap.Int("segment_count", len(batchSegIDs)),
+				zap.Int("remaining_after_batch", len(orderedSegIDs)-end),
+				zap.Bool("prune_control_enabled", pruneControlEnabled),
+				zap.String("prune_threshold_summary", pruneThresholdSummary))
+		}
 
 		_, batchSpan := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("adaptive.batch[%d]", batches))
 		batchSpan.SetAttributes(attribute.Int("segment_count", len(batchSegIDs)))
@@ -285,11 +294,13 @@ func (sd *shardDelegator) adaptiveSearch(
 		if err := decodeAdaptiveSearchResults(batchResults); err != nil {
 			return nil, err
 		}
-		log.Info("adaptive search batch result topk",
-			zap.Int("batch", batches),
-			zap.Int("result_messages", len(batchResults)),
-			zap.Int("scores", searchResultsScoreCount(batchResults)),
-			zap.String("topk_summary", summarizeSearchResultsTopKScores(batchResults, metricType, int(nq), int(topK), 3, 5)))
+		if debugEnabled {
+			log.Debug("adaptive search batch result topk",
+				zap.Int("batch", batches),
+				zap.Int("result_messages", len(batchResults)),
+				zap.Int("scores", searchResultsScoreCount(batchResults)),
+				zap.String("topk_summary", summarizeSearchResultsTopKScores(batchResults, metricType, int(nq), int(topK), 3, 5)))
+		}
 		allResults = append(allResults, batchResults...)
 		batches++
 
@@ -298,29 +309,35 @@ func (sd *shardDelegator) adaptiveSearch(
 		thresholds, heapFull := runHeap.thresholds()
 		if !heapFull {
 			// Heap not full yet — no meaningful threshold; skip convergence.
-			log.Info("adaptive search batch threshold not ready",
-				zap.Int("batch", batches-1),
-				zap.Int("result_messages", len(batchResults)),
-				zap.Int("scores", searchResultsScoreCount(batchResults)))
+			if debugEnabled {
+				log.Debug("adaptive search batch threshold not ready",
+					zap.Int("batch", batches-1),
+					zap.Int("result_messages", len(batchResults)),
+					zap.Int("scores", searchResultsScoreCount(batchResults)))
+			}
 			continue
 		}
 		converged, reason := converger.Check(thresholds, len(batchResults), batches-1)
-		log.Info("adaptive search batch threshold",
-			zap.Int("batch", batches-1),
-			zap.Int("batches", batches),
-			zap.Int("result_messages", len(batchResults)),
-			zap.Int("scores", searchResultsScoreCount(batchResults)),
-			zap.String("threshold_summary", summarizeAdaptiveThresholds(thresholds, metricType)),
-			zap.Bool("converged", converged),
-			zap.String("reason", reason),
-			zap.Int("pruned_if_stop", len(orderedSegIDs)-end))
+		if debugEnabled {
+			log.Debug("adaptive search batch threshold",
+				zap.Int("batch", batches-1),
+				zap.Int("batches", batches),
+				zap.Int("result_messages", len(batchResults)),
+				zap.Int("scores", searchResultsScoreCount(batchResults)),
+				zap.String("threshold_summary", summarizeAdaptiveThresholds(thresholds, metricType)),
+				zap.Bool("converged", converged),
+				zap.String("reason", reason),
+				zap.Int("pruned_if_stop", len(orderedSegIDs)-end))
+		}
 		if converged {
 			pruned := len(orderedSegIDs) - end
-			log.Info("adaptive search converged",
-				zap.Int("batches", batches),
-				zap.Int("pruned", pruned),
-				zap.String("reason", reason),
-				zap.Duration("elapsed", tr.ElapseSpan()))
+			if debugEnabled {
+				log.Debug("adaptive search converged",
+					zap.Int("batches", batches),
+					zap.Int("pruned", pruned),
+					zap.String("reason", reason),
+					zap.Duration("elapsed", tr.ElapseSpan()))
+			}
 
 			metrics.QueryNodeAdaptiveSearchTotal.WithLabelValues(
 				paramtable.GetStringNodeID(),
@@ -341,9 +358,11 @@ func (sd *shardDelegator) adaptiveSearch(
 	}
 
 	// Exhausted all batches without convergence.
-	log.Info("adaptive search exhausted all batches",
-		zap.Int("batches", batches),
-		zap.Duration("elapsed", tr.ElapseSpan()))
+	if debugEnabled {
+		log.Debug("adaptive search exhausted all batches",
+			zap.Int("batches", batches),
+			zap.Duration("elapsed", tr.ElapseSpan()))
+	}
 
 	metrics.QueryNodeAdaptiveSearchTotal.WithLabelValues(
 		paramtable.GetStringNodeID(),
