@@ -3537,6 +3537,12 @@ type queryNodeConfig struct {
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"true"`
 	AdaptiveSearchEnabled                   ParamItem `refreshable:"true"`
 	AdaptiveSearchBatchSize                 ParamItem `refreshable:"true"`
+	AdaptiveSearchDynamicBatchEnabled       ParamItem `refreshable:"true"`
+	AdaptiveSearchInitBatchSize             ParamItem `refreshable:"true"`
+	AdaptiveSearchMaxBatchSize              ParamItem `refreshable:"true"`
+	AdaptiveSearchBatchGrowthFactor         ParamItem `refreshable:"true"`
+	AdaptiveSearchNoBetterWindow            ParamItem `refreshable:"true"`
+	AdaptiveSearchNoBetterMinBatches        ParamItem `refreshable:"true"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
 	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
@@ -4748,6 +4754,60 @@ user-task-polling:
 		Export:       true,
 	}
 	p.AdaptiveSearchBatchSize.Init(base.mgr)
+
+	p.AdaptiveSearchDynamicBatchEnabled = ParamItem{
+		Key:          "queryNode.adaptiveSearch.dynamicBatch.enabled",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "enable exponential adaptive search batch size growth",
+		Export:       true,
+	}
+	p.AdaptiveSearchDynamicBatchEnabled.Init(base.mgr)
+
+	p.AdaptiveSearchInitBatchSize = ParamItem{
+		Key:          "queryNode.adaptiveSearch.dynamicBatch.initBatchSize",
+		Version:      "2.6.0",
+		DefaultValue: "1",
+		Doc:          "initial segment batch size for dynamic adaptive search scheduling",
+		Export:       true,
+	}
+	p.AdaptiveSearchInitBatchSize.Init(base.mgr)
+
+	p.AdaptiveSearchMaxBatchSize = ParamItem{
+		Key:          "queryNode.adaptiveSearch.dynamicBatch.maxBatchSize",
+		Version:      "2.6.0",
+		DefaultValue: "0",
+		Doc:          "max segment batch size for dynamic adaptive search scheduling; 0 means use adaptiveSearch.batchSize",
+		Export:       true,
+	}
+	p.AdaptiveSearchMaxBatchSize.Init(base.mgr)
+
+	p.AdaptiveSearchBatchGrowthFactor = ParamItem{
+		Key:          "queryNode.adaptiveSearch.dynamicBatch.growthFactor",
+		Version:      "2.6.0",
+		DefaultValue: "2",
+		Doc:          "growth factor for dynamic adaptive search batch scheduling",
+		Export:       true,
+	}
+	p.AdaptiveSearchBatchGrowthFactor.Init(base.mgr)
+
+	p.AdaptiveSearchNoBetterWindow = ParamItem{
+		Key:          "queryNode.adaptiveSearch.noBetterWindow",
+		Version:      "2.6.0",
+		DefaultValue: "0",
+		Doc:          "stop adaptive search after this many consecutive full-heap batches without threshold improvement; 0 disables",
+		Export:       true,
+	}
+	p.AdaptiveSearchNoBetterWindow.Init(base.mgr)
+
+	p.AdaptiveSearchNoBetterMinBatches = ParamItem{
+		Key:          "queryNode.adaptiveSearch.noBetterMinBatches",
+		Version:      "2.6.0",
+		DefaultValue: "2",
+		Doc:          "minimum adaptive search batches before no-better early termination is allowed",
+		Export:       true,
+	}
+	p.AdaptiveSearchNoBetterMinBatches.Init(base.mgr)
 
 	p.UseStreamComputing = ParamItem{
 		Key:          "queryNode.useStreamComputing",

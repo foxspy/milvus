@@ -575,6 +575,13 @@ queryNode:
   adaptiveSearch:
     enabled: true
     batchSize: auto
+    dynamicBatch:
+      enabled: false
+      initBatchSize: 1
+      maxBatchSize: 0 # 0 means use adaptiveSearch.batchSize as max
+      growthFactor: 2
+    noBetterWindow: 0 # stop after N consecutive full-heap batches without threshold improvement; 0 disables
+    noBetterMinBatches: 2
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure

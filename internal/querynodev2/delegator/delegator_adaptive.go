@@ -242,15 +242,37 @@ func (sd *shardDelegator) adaptiveSearch(
 	}
 
 	batchSizeCfg := paramtable.Get().QueryNodeCfg.AdaptiveSearchBatchSize.GetValue()
-	batchSize := adaptive.ResolveBatchSize(batchSizeCfg, len(orderedSegIDs))
-	converger := adaptive.NewStableTopKConverger()
+	fixedBatchSize := adaptive.ResolveBatchSize(batchSizeCfg, len(orderedSegIDs))
+	dynamicBatchEnabled := paramtable.Get().QueryNodeCfg.AdaptiveSearchDynamicBatchEnabled.GetAsBool()
+	dynamicMaxBatchSize := paramtable.Get().QueryNodeCfg.AdaptiveSearchMaxBatchSize.GetAsInt()
+	if dynamicMaxBatchSize <= 0 {
+		dynamicMaxBatchSize = fixedBatchSize
+	}
+	if dynamicMaxBatchSize <= 0 {
+		dynamicMaxBatchSize = len(orderedSegIDs)
+	}
+	batchScheduler := adaptive.NewDynamicBatchScheduler(
+		paramtable.Get().QueryNodeCfg.AdaptiveSearchInitBatchSize.GetAsInt(),
+		dynamicMaxBatchSize,
+		paramtable.Get().QueryNodeCfg.AdaptiveSearchBatchGrowthFactor.GetAsInt())
+	stableConverger := adaptive.NewStableTopKConverger()
+	noBetterConverger := adaptive.NewNoBetterBatchConverger(
+		paramtable.Get().QueryNodeCfg.AdaptiveSearchNoBetterWindow.GetAsInt(),
+		paramtable.Get().QueryNodeCfg.AdaptiveSearchNoBetterMinBatches.GetAsInt())
 	batches := 0
 
-	for i := 0; i < len(orderedSegIDs); i += batchSize {
+	for i := 0; i < len(orderedSegIDs); {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 
+		batchSize := fixedBatchSize
+		if dynamicBatchEnabled {
+			batchSize = batchScheduler.NextBatchSize(i, len(orderedSegIDs))
+		}
+		if batchSize <= 0 {
+			batchSize = len(orderedSegIDs) - i
+		}
 		end := i + batchSize
 		if end > len(orderedSegIDs) {
 			end = len(orderedSegIDs)
@@ -266,11 +288,12 @@ func (sd *shardDelegator) adaptiveSearch(
 		batchReq := req
 		pruneControlEnabled := false
 		pruneThresholdSummary := ""
-		if currentThr, full := runHeap.thresholds(); full {
-			batchReq = cloneReqWithPruneControl(req, currentThr, metricType)
+		beforeThresholds, beforeHeapFull := runHeap.thresholds()
+		if beforeHeapFull {
+			batchReq = cloneReqWithPruneControl(req, beforeThresholds, metricType)
 			pruneControlEnabled = batchReq != req
 			if debugEnabled {
-				pruneThresholdSummary = summarizeAdaptiveThresholds(currentThr, metricType)
+				pruneThresholdSummary = summarizeAdaptiveThresholds(beforeThresholds, metricType)
 			}
 		}
 		if debugEnabled {
@@ -279,14 +302,23 @@ func (sd *shardDelegator) adaptiveSearch(
 				zap.Int("segment_start", i),
 				zap.Int("segment_end", end),
 				zap.Int("segment_count", len(batchSegIDs)),
+				zap.Int("batch_size", batchSize),
 				zap.Int("remaining_after_batch", len(orderedSegIDs)-end),
+				zap.Bool("dynamic_batch_enabled", dynamicBatchEnabled),
+				zap.Bool("heap_full_before", beforeHeapFull),
 				zap.Bool("prune_control_enabled", pruneControlEnabled),
 				zap.String("prune_threshold_summary", pruneThresholdSummary))
 		}
 
 		_, batchSpan := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("adaptive.batch[%d]", batches))
 		batchSpan.SetAttributes(attribute.Int("segment_count", len(batchSegIDs)))
+		batchTR := timerecord.NewTimeRecorder("adaptiveSearchBatch")
 		batchResults, err := sd.executeSearchSubTasks(ctx, batchReq, batchSealed, nil, sealedRowCount)
+		batchElapsed := batchTR.ElapseSpan()
+		metrics.QueryNodeAdaptiveBatchLatency.WithLabelValues(
+			paramtable.GetStringNodeID(),
+			fmt.Sprint(sd.collectionID),
+			adaptiveBatchIndexBucket(batches)).Observe(float64(batchElapsed.Milliseconds()))
 		batchSpan.End()
 		if err != nil {
 			return nil, err
@@ -315,9 +347,21 @@ func (sd *shardDelegator) adaptiveSearch(
 					zap.Int("result_messages", len(batchResults)),
 					zap.Int("scores", searchResultsScoreCount(batchResults)))
 			}
+			i = end
 			continue
 		}
-		converged, reason := converger.Check(thresholds, len(batchResults), batches-1)
+		stableConverged, stableReason := stableConverger.Check(thresholds, len(batchResults), batches-1)
+		noBetterConverged, noBetterReason, thresholdImproved := noBetterConverger.Check(
+			beforeThresholds,
+			beforeHeapFull,
+			thresholds,
+			heapFull,
+			batches-1)
+		converged := stableConverged || noBetterConverged
+		reason := stableReason
+		if reason == "" {
+			reason = noBetterReason
+		}
 		if debugEnabled {
 			log.Debug("adaptive search batch threshold",
 				zap.Int("batch", batches-1),
@@ -325,6 +369,11 @@ func (sd *shardDelegator) adaptiveSearch(
 				zap.Int("result_messages", len(batchResults)),
 				zap.Int("scores", searchResultsScoreCount(batchResults)),
 				zap.String("threshold_summary", summarizeAdaptiveThresholds(thresholds, metricType)),
+				zap.Bool("heap_full_before", beforeHeapFull),
+				zap.Bool("heap_full_after", heapFull),
+				zap.Bool("threshold_improved", thresholdImproved),
+				zap.Bool("stable_converged", stableConverged),
+				zap.Bool("no_better_converged", noBetterConverged),
 				zap.Bool("converged", converged),
 				zap.String("reason", reason),
 				zap.Int("pruned_if_stop", len(orderedSegIDs)-end))
@@ -352,9 +401,13 @@ func (sd *shardDelegator) adaptiveSearch(
 			metrics.QueryNodeAdaptiveE2ELatency.WithLabelValues(
 				paramtable.GetStringNodeID(),
 				fmt.Sprint(sd.collectionID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+			metrics.QueryNodeAdaptiveConvergeReason.WithLabelValues(
+				paramtable.GetStringNodeID(),
+				reason).Inc()
 
 			return allResults, nil
 		}
+		i = end
 	}
 
 	// Exhausted all batches without convergence.
@@ -374,8 +427,24 @@ func (sd *shardDelegator) adaptiveSearch(
 	metrics.QueryNodeAdaptiveE2ELatency.WithLabelValues(
 		paramtable.GetStringNodeID(),
 		fmt.Sprint(sd.collectionID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.QueryNodeAdaptiveConvergeReason.WithLabelValues(
+		paramtable.GetStringNodeID(),
+		"exhausted").Inc()
 
 	return allResults, nil
+}
+
+func adaptiveBatchIndexBucket(batchIdx int) string {
+	switch {
+	case batchIdx < 4:
+		return fmt.Sprint(batchIdx)
+	case batchIdx < 8:
+		return "4-7"
+	case batchIdx < 16:
+		return "8-15"
+	default:
+		return "16+"
+	}
 }
 
 func summarizeAdaptiveThresholds(thresholds []float32, metric string) string {
