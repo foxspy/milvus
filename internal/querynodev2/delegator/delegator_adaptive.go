@@ -204,6 +204,9 @@ func (sd *shardDelegator) adaptiveSearch(
 		if err != nil {
 			return nil, err
 		}
+		if err := decodeAdaptiveSearchResults(preBatchResults); err != nil {
+			return nil, err
+		}
 		log.Info("adaptive search pre-batch result topk",
 			zap.Int("result_messages", len(preBatchResults)),
 			zap.Int("scores", searchResultsScoreCount(preBatchResults)),
@@ -277,6 +280,9 @@ func (sd *shardDelegator) adaptiveSearch(
 		batchResults, err := sd.executeSearchSubTasks(ctx, batchReq, batchSealed, nil, sealedRowCount)
 		batchSpan.End()
 		if err != nil {
+			return nil, err
+		}
+		if err := decodeAdaptiveSearchResults(batchResults); err != nil {
 			return nil, err
 		}
 		log.Info("adaptive search batch result topk",
@@ -396,6 +402,21 @@ func adaptiveUserThreshold(threshold float32, metric string) float32 {
 	default:
 		return -threshold
 	}
+}
+
+func decodeAdaptiveSearchResults(results []*internalpb.SearchResults) error {
+	for _, result := range results {
+		if result == nil || result.GetResultData() != nil || len(result.GetSlicedBlob()) == 0 {
+			continue
+		}
+		var resultData schemapb.SearchResultData
+		if err := proto.Unmarshal(result.GetSlicedBlob(), &resultData); err != nil {
+			return fmt.Errorf("decode adaptive search result data: %w", err)
+		}
+		result.ResultData = &resultData
+		result.SlicedBlob = nil
+	}
+	return nil
 }
 
 func searchResultsScoreCount(results []*internalpb.SearchResults) int {
