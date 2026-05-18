@@ -11,6 +11,7 @@
 
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
+#include "common/RangeSearchHelper.h"
 #include <algorithm>
 
 namespace milvus::query {
@@ -265,11 +266,15 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
                                             const SearchInfo& search_info) {
     auto last_bound = ConvertIncomingDistance(
         search_info.iterator_v2_info_.value().last_bound);
-    auto radius = ConvertIncomingDistance(
-        index::GetValueFromConfig<float>(search_info.search_params_, RADIUS));
-    auto range_filter =
-        ConvertIncomingDistance(index::GetValueFromConfig<float>(
-            search_info.search_params_, RANGE_FILTER));
+    auto radius =
+        index::GetValueFromConfig<float>(search_info.search_params_, RADIUS);
+    auto range_filter = index::GetValueFromConfig<float>(
+        search_info.search_params_, RANGE_FILTER);
+    if (!radius.has_value() && range_filter.has_value()) {
+        radius = GetRangeSearchDefaultRadius(search_info.metric_type_);
+    }
+    radius = ConvertIncomingDistance(radius);
+    range_filter = ConvertIncomingDistance(range_filter);
 
     std::vector<DisIdPair> rst;
     rst.reserve(batch_size_);

@@ -958,14 +958,6 @@ func (h *HandlersV1) search(c *gin.Context) {
 		radius, radiusOk := httpReq.Params[ParamRadius]
 		rangeFilter, rangeFilterOk := httpReq.Params[ParamRangeFilter]
 		if rangeFilterOk {
-			if !radiusOk {
-				log.Warn("high level restful api, search params invalid, because only " + ParamRangeFilter)
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
-					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: invalid search params",
-				})
-				return
-			}
 			params[ParamRangeFilter] = rangeFilter
 		}
 		if radiusOk {

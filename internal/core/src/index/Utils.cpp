@@ -408,10 +408,15 @@ CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
                                        const int64_t topk,
                                        const MetricType& metric_type,
                                        knowhere::Json& search_config) {
-    const auto radius =
+    auto radius =
         index::GetValueFromConfig<float>(search_info.search_params_, RADIUS);
-    if (!radius.has_value()) {
+    const auto range_filter =
+        GetValueFromConfig<float>(search_info.search_params_, RANGE_FILTER);
+    if (!radius.has_value() && !range_filter.has_value()) {
         return false;
+    }
+    if (!radius.has_value()) {
+        radius = milvus::GetRangeSearchDefaultRadius(metric_type);
     }
 
     search_config[RADIUS] = radius.value();
@@ -420,8 +425,6 @@ CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
     // set it to -1 will return all results in the range.
     search_config[knowhere::meta::RANGE_SEARCH_K] = topk;
 
-    const auto range_filter =
-        GetValueFromConfig<float>(search_info.search_params_, RANGE_FILTER);
     if (range_filter.has_value()) {
         search_config[RANGE_FILTER] = range_filter.value();
         CheckRangeSearchParam(

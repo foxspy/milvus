@@ -27,4 +27,7 @@ CheckRangeSearchParam(float radius,
                       float range_filter,
                       const std::string& metric_type);
 
+float
+GetRangeSearchDefaultRadius(const std::string& metric_type);
+
 }  // namespace milvus

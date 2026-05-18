@@ -252,6 +252,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	if err != nil {
 		searchParamStr = ""
 	}
+	hasRangeSearchParam := strings.Contains(searchParamStr, radiusKey) || strings.Contains(searchParamStr, rangeFilterKey)
 
 	// 5. parse group by field and group by size
 	var groupByFieldId, groupSize int64
@@ -271,7 +272,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do groupBy when doing iteration")}
 	}
-	if strings.Contains(searchParamStr, radiusKey) && groupByFieldId > 0 {
+	if hasRangeSearchParam && groupByFieldId > 0 {
 		return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do range-search when doing search-group-by")}
 	}

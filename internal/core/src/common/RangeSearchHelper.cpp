@@ -12,6 +12,7 @@
 #include <queue>
 #include <vector>
 #include <functional>
+#include <limits>
 
 #include "common/Utils.h"
 #include "common/RangeSearchHelper.h"
@@ -133,6 +134,32 @@ CheckRangeSearchParam(float radius,
                    range_filter,
                    radius);
     }
+}
+
+float
+GetRangeSearchDefaultRadius(const std::string& metric_type) {
+    if (IsMetricType(metric_type, knowhere::metric::COSINE)) {
+        return -1.0f;
+    }
+
+    if (IsMetricType(metric_type, knowhere::metric::BM25) ||
+        IsMetricType(metric_type, knowhere::metric::MHJACCARD)) {
+        return 0.0f;
+    }
+
+    if (IsMetricType(metric_type, knowhere::metric::JACCARD)) {
+        return 1.0f;
+    }
+
+    if (IsMetricType(metric_type, knowhere::metric::HAMMING)) {
+        return static_cast<float>(std::numeric_limits<int>::max());
+    }
+
+    if (PositivelyRelated(metric_type)) {
+        return std::numeric_limits<float>::lowest();
+    }
+
+    return std::numeric_limits<float>::max();
 }
 
 }  // namespace milvus

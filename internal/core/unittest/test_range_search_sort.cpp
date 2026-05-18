@@ -14,6 +14,7 @@
 #include <random>
 #include <vector>
 #include <iostream>
+#include <limits>
 
 #include "common/RangeSearchHelper.h"
 #include "common/Types.h"
@@ -171,4 +172,21 @@ TEST_P(RangeSearchSortTest, CheckRangeSearchSort) {
     CheckRangeSearchSortResult(p_id, p_dist, res, N * TOPK);
     delete[] p_id;
     delete[] p_dist;
+}
+
+TEST(RangeSearchHelperTest, DefaultRadiusForRangeFilterOnly) {
+    ASSERT_EQ(milvus::GetRangeSearchDefaultRadius(knowhere::metric::L2),
+              std::numeric_limits<float>::max());
+    ASSERT_EQ(milvus::GetRangeSearchDefaultRadius(knowhere::metric::JACCARD),
+              1.0f);
+    ASSERT_EQ(milvus::GetRangeSearchDefaultRadius(knowhere::metric::HAMMING),
+              static_cast<float>(std::numeric_limits<int>::max()));
+    ASSERT_EQ(milvus::GetRangeSearchDefaultRadius(knowhere::metric::COSINE),
+              -1.0f);
+    ASSERT_EQ(milvus::GetRangeSearchDefaultRadius(knowhere::metric::BM25),
+              0.0f);
+    ASSERT_EQ(milvus::GetRangeSearchDefaultRadius(knowhere::metric::MHJACCARD),
+              0.0f);
+    ASSERT_EQ(milvus::GetRangeSearchDefaultRadius(knowhere::metric::IP),
+              std::numeric_limits<float>::lowest());
 }

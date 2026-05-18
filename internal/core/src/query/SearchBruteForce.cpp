@@ -122,6 +122,11 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
     sub_result.mutable_seg_offsets().resize(nq * topk);
     sub_result.mutable_distances().resize(nq * topk);
 
+    if (!search_cfg.contains(RADIUS) && search_cfg.contains(RANGE_FILTER)) {
+        search_cfg[RADIUS] =
+            GetRangeSearchDefaultRadius(search_info.metric_type_);
+    }
+
     if (search_cfg.contains(RADIUS)) {
         if (search_cfg.contains(RANGE_FILTER)) {
             CheckRangeSearchParam(search_cfg[RADIUS],

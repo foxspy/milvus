@@ -2648,6 +2648,25 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		assert.Nil(t, searchInfo.planInfo)
 		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
 	})
+	t.Run("check range-filter-only and groupBy", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		resetSearchParamsValue(normalParam, SearchParamsKey, `{"nprobe": 10, "range_filter":0.2}`)
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   GroupByFieldKey,
+			Value: "string_field",
+		})
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo.planInfo)
+		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
+	})
 	t.Run("check nullable and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()
 		normalParam = append(normalParam, &commonpb.KeyValuePair{
