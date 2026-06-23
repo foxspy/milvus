@@ -305,6 +305,11 @@ message AnalyzeTask {
     string fail_reason = 11;
     int64 dim = 12;
     string centroids_file = 13;
+    bool enable_global_index = 14;
+    string insert_channel = 15;
+    string global_stats_index_root = 16;
+    string head_index_file = 17;
+    string compaction_plan_file = 18;
 }
 
 message SegmentStats {

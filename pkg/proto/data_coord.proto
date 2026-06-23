@@ -766,6 +766,10 @@ message CompactionPlan {
   repeated common.KeyValuePair plugin_context = 29;
   repeated internal.FileResourceInfo file_resources = 30;
   repeated schema.FunctionSchema functions = 31;
+  bool enable_global_index = 32;
+  string global_stats_index_root = 33;
+  string head_index_file = 34;
+  string compaction_plan_file = 35;
 }
 
 message CompactionSegment {
@@ -1398,6 +1402,10 @@ message CompactionTask{
   repeated int64 tmpSegments = 27;
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
+  bool enable_global_index = 30;
+  string global_stats_index_root = 31;
+  string head_index_file = 32;
+  string compaction_plan_file = 33;
 }
 
 message PartitionStatsInfo {

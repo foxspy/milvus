@@ -365,6 +365,10 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		PreferSegmentRows:      taskProto.GetPreferSegmentRows(),
 		AnalyzeResultPath:      path.Join(t.meta.(*meta).chunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(taskProto.AnalyzeTaskID, taskProto.AnalyzeVersion)),
 		AnalyzeSegmentIds:      taskProto.GetInputSegments(),
+		EnableGlobalIndex:      taskProto.GetEnableGlobalIndex(),
+		GlobalStatsIndexRoot:   taskProto.GetGlobalStatsIndexRoot(),
+		HeadIndexFile:          taskProto.GetHeadIndexFile(),
+		CompactionPlanFile:     taskProto.GetCompactionPlanFile(),
 		BeginLogID:             logIDRange.Begin, // BeginLogID is deprecated, but still assign it for compatibility.
 		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
 		PreAllocatedLogIDs:     logIDRange,
@@ -619,11 +623,15 @@ func (t *clusteringCompactionTask) processAnalyzing() error {
 		zap.Int64("version", analyzeTask.GetVersion()), zap.String("state", analyzeTask.State.String()))
 	switch analyzeTask.State {
 	case indexpb.JobState_JobStateFinished:
-		if analyzeTask.GetCentroidsFile() == "" {
+		if analyzeTask.GetCentroidsFile() == "" && !analyzeTask.GetEnableGlobalIndex() {
 			// not retryable, fake finished vector clustering is not supported in opensource
 			return merr.WrapErrClusteringCompactionNotSupportVector()
 		} else {
 			t.GetTaskProto().AnalyzeVersion = analyzeTask.GetVersion()
+			t.GetTaskProto().EnableGlobalIndex = analyzeTask.GetEnableGlobalIndex()
+			t.GetTaskProto().GlobalStatsIndexRoot = analyzeTask.GetGlobalStatsIndexRoot()
+			t.GetTaskProto().HeadIndexFile = analyzeTask.GetHeadIndexFile()
+			t.GetTaskProto().CompactionPlanFile = analyzeTask.GetCompactionPlanFile()
 			return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining))
 		}
 	case indexpb.JobState_JobStateFailed:
@@ -742,14 +750,16 @@ func (t *clusteringCompactionTask) doClean() error {
 func (t *clusteringCompactionTask) doAnalyze() error {
 	log := log.Ctx(context.TODO())
 	analyzeTask := &indexpb.AnalyzeTask{
-		CollectionID: t.GetTaskProto().GetCollectionID(),
-		PartitionID:  t.GetTaskProto().GetPartitionID(),
-		FieldID:      t.GetTaskProto().GetClusteringKeyField().FieldID,
-		FieldName:    t.GetTaskProto().GetClusteringKeyField().Name,
-		FieldType:    t.GetTaskProto().GetClusteringKeyField().DataType,
-		SegmentIDs:   t.GetTaskProto().GetInputSegments(),
-		TaskID:       t.GetTaskProto().GetAnalyzeTaskID(),
-		State:        indexpb.JobState_JobStateInit,
+		CollectionID:      t.GetTaskProto().GetCollectionID(),
+		PartitionID:       t.GetTaskProto().GetPartitionID(),
+		FieldID:           t.GetTaskProto().GetClusteringKeyField().FieldID,
+		FieldName:         t.GetTaskProto().GetClusteringKeyField().Name,
+		FieldType:         t.GetTaskProto().GetClusteringKeyField().DataType,
+		InsertChannel:     t.GetTaskProto().GetChannel(),
+		EnableGlobalIndex: t.GetTaskProto().GetEnableGlobalIndex(),
+		SegmentIDs:        t.GetTaskProto().GetInputSegments(),
+		TaskID:            t.GetTaskProto().GetAnalyzeTaskID(),
+		State:             indexpb.JobState_JobStateInit,
 	}
 	err := t.meta.GetAnalyzeMeta().AddAnalyzeTask(analyzeTask)
 	if err != nil {

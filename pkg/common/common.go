@@ -173,9 +173,17 @@ const (
 	PartitionStatsPath = `part_stats`
 
 	// AnalyzeStatsPath storage path const for analyze.
-	AnalyzeStatsPath = `analyze_stats`
-	OffsetMapping    = `offset_mapping`
-	Centroids        = "centroids"
+	AnalyzeStatsPath      = `analyze_stats`
+	OffsetMapping         = `offset_mapping`
+	OffsetDistanceMapping = `offset_distance_mapping`
+	CompactionPrePlan     = `compaction_pre_plan`
+	Centroids             = "centroids"
+
+	// GlobalStatsIndexPath storage path const for global stats index.
+	GlobalStatsIndexPath     = `global_stats_index`
+	GlobalStatsManifest      = `manifest`
+	GlobalStatsHeadIndexPath = `head_index`
+	GlobalStatsChunkMapping  = `chunk_mapping`
 
 	// TextIndexPath storage path const for text index
 	TextIndexPath = "text_log"

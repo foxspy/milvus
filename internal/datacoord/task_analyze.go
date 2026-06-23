@@ -145,17 +145,19 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		return
 	}
 	req := &workerpb.AnalyzeRequest{
-		ClusterID:     Params.CommonCfg.ClusterPrefix.GetValue(),
-		TaskID:        at.GetTaskID(),
-		CollectionID:  task.CollectionID,
-		PartitionID:   task.PartitionID,
-		FieldID:       task.FieldID,
-		FieldName:     task.FieldName,
-		FieldType:     task.FieldType,
-		Dim:           task.Dim,
-		SegmentStats:  make(map[int64]*indexpb.SegmentStats),
-		Version:       task.Version + 1,
-		StorageConfig: createStorageConfig(),
+		ClusterID:         Params.CommonCfg.ClusterPrefix.GetValue(),
+		TaskID:            at.GetTaskID(),
+		CollectionID:      task.CollectionID,
+		PartitionID:       task.PartitionID,
+		FieldID:           task.FieldID,
+		FieldName:         task.FieldName,
+		FieldType:         task.FieldType,
+		InsertChannel:     task.GetInsertChannel(),
+		Dim:               task.Dim,
+		SegmentStats:      make(map[int64]*indexpb.SegmentStats),
+		Version:           task.Version + 1,
+		StorageConfig:     createStorageConfig(),
+		EnableGlobalIndex: task.GetEnableGlobalIndex(),
 	}
 
 	// Populate SegmentStats with binlog IDs and row counts from segment metadata.

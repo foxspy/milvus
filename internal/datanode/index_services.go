@@ -533,10 +533,13 @@ func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJ
 		info := node.taskManager.GetAnalyzeTaskInfo(req.GetClusterID(), taskID)
 		if info != nil {
 			results = append(results, &workerpb.AnalyzeResult{
-				TaskID:        taskID,
-				State:         info.State,
-				FailReason:    info.FailReason,
-				CentroidsFile: info.CentroidsFile,
+				TaskID:               taskID,
+				State:                info.State,
+				FailReason:           info.FailReason,
+				CentroidsFile:        info.CentroidsFile,
+				GlobalStatsIndexRoot: info.GlobalStatsIndexRoot,
+				HeadIndexFile:        info.HeadIndexFile,
+				CompactionPlanFile:   info.CompactionPlanFile,
 			})
 		}
 	}

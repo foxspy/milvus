@@ -194,10 +194,13 @@ func (m *TaskManager) deleteAllIndexTasks() []*IndexTaskInfo {
 }
 
 type AnalyzeTaskInfo struct {
-	Cancel        context.CancelFunc
-	State         indexpb.JobState
-	FailReason    string
-	CentroidsFile string
+	Cancel               context.CancelFunc
+	State                indexpb.JobState
+	FailReason           string
+	CentroidsFile        string
+	GlobalStatsIndexRoot string
+	HeadIndexFile        string
+	CompactionPlanFile   string
 }
 
 func (m *TaskManager) LoadOrStoreAnalyzeTask(clusterID string, taskID typeutil.UniqueID, info *AnalyzeTaskInfo) *AnalyzeTaskInfo {
@@ -239,12 +242,18 @@ func (m *TaskManager) StoreAnalyzeFilesAndStatistic(
 	ClusterID string,
 	taskID typeutil.UniqueID,
 	centroidsFile string,
+	globalStatsIndexRoot string,
+	headIndexFile string,
+	compactionPlanFile string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	if info, ok := m.analyzeTasks[key]; ok {
 		info.CentroidsFile = centroidsFile
+		info.GlobalStatsIndexRoot = globalStatsIndexRoot
+		info.HeadIndexFile = headIndexFile
+		info.CompactionPlanFile = compactionPlanFile
 		return
 	}
 }
@@ -255,10 +264,13 @@ func (m *TaskManager) GetAnalyzeTaskInfo(clusterID string, taskID typeutil.Uniqu
 
 	if info, ok := m.analyzeTasks[Key{ClusterID: clusterID, TaskID: taskID}]; ok {
 		return &AnalyzeTaskInfo{
-			Cancel:        info.Cancel,
-			State:         info.State,
-			FailReason:    info.FailReason,
-			CentroidsFile: info.CentroidsFile,
+			Cancel:               info.Cancel,
+			State:                info.State,
+			FailReason:           info.FailReason,
+			CentroidsFile:        info.CentroidsFile,
+			GlobalStatsIndexRoot: info.GlobalStatsIndexRoot,
+			HeadIndexFile:        info.HeadIndexFile,
+			CompactionPlanFile:   info.CompactionPlanFile,
 		}
 	}
 	return nil

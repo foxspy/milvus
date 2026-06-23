@@ -20,13 +20,16 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -233,6 +236,123 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 
 	err = t.PreExecute(context.Background())
 	suite.NoError(err)
+}
+
+type fakeAnalyze struct{}
+
+func (f *fakeAnalyze) Delete() error {
+	return nil
+}
+
+func (f *fakeAnalyze) GetResult(size int) (string, int64, []string, []int64, error) {
+	return "centroids", 1, nil, nil, nil
+}
+
+func TestAnalyzeTaskExecuteUsesInjectedRunner(t *testing.T) {
+	ctx := context.Background()
+	req := &workerpb.AnalyzeRequest{
+		ClusterID:    "cluster",
+		TaskID:       10,
+		CollectionID: 100,
+		PartitionID:  200,
+		FieldID:      300,
+		FieldName:    "vec",
+		FieldType:    schemapb.DataType_FloatVector,
+		SegmentStats: map[int64]*indexpb.SegmentStats{
+			400: {
+				ID:      400,
+				NumRows: 1000,
+				LogIDs:  []int64{500, 501},
+			},
+		},
+		Version: 2,
+		StorageConfig: &indexpb.StorageConfig{
+			RootPath:    "/root",
+			StorageType: "local",
+		},
+		Dim:                 128,
+		NumClusters:         16,
+		MaxTrainSizeRatio:   0.2,
+		MinClusterSizeRatio: 0.1,
+		MaxClusterSizeRatio: 10,
+		MaxClusterSize:      1024,
+	}
+
+	var called bool
+	runner := func(ctx context.Context, info *clusteringpb.AnalyzeInfo) (analyzecgowrapper.CodecAnalyze, error) {
+		called = true
+		require.Equal(t, req.GetClusterID(), info.GetClusterID())
+		require.Equal(t, req.GetTaskID(), info.GetBuildID())
+		require.Equal(t, req.GetCollectionID(), info.GetCollectionID())
+		require.Equal(t, req.GetPartitionID(), info.GetPartitionID())
+		require.Equal(t, req.GetFieldID(), info.GetFieldSchema().GetFieldID())
+		require.Equal(t, req.GetFieldType(), info.GetFieldSchema().GetDataType())
+		require.Equal(t, req.GetNumClusters(), info.GetNumClusters())
+		require.Equal(t, req.GetDim(), info.GetDim())
+		require.Equal(t, int64(1000), info.GetNumRows()[400])
+		require.Equal(t, []string{
+			metautil.BuildInsertLogPath("/root", 100, 200, 400, 300, 500),
+			metautil.BuildInsertLogPath("/root", 100, 200, 400, 300, 501),
+		}, info.GetInsertFiles()[400].GetInsertFiles())
+		return &fakeAnalyze{}, nil
+	}
+
+	task := NewAnalyzeTask(ctx, func() {}, req, NewTaskManager(ctx))
+	task.analyzeRunner = runner
+	require.NoError(t, task.Execute(ctx))
+	require.True(t, called)
+	require.IsType(t, &fakeAnalyze{}, task.analyze)
+}
+
+func TestAnalyzeTaskExecuteUsesAnalyzeV2RunnerForGlobalIndex(t *testing.T) {
+	ctx := context.Background()
+	req := &workerpb.AnalyzeRequest{
+		ClusterID:         "cluster",
+		TaskID:            10,
+		CollectionID:      100,
+		PartitionID:       200,
+		FieldID:           300,
+		FieldName:         "vec",
+		FieldType:         schemapb.DataType_FloatVector,
+		InsertChannel:     "by-dev-rootcoord-dml_0_100v0",
+		EnableGlobalIndex: true,
+		SegmentStats: map[int64]*indexpb.SegmentStats{
+			400: {
+				ID:      400,
+				NumRows: 1000,
+				LogIDs:  []int64{500},
+			},
+		},
+		Version: 2,
+		StorageConfig: &indexpb.StorageConfig{
+			RootPath:    "/root",
+			StorageType: "local",
+		},
+		Dim:                 128,
+		NumClusters:         16,
+		MaxTrainSizeRatio:   0.2,
+		MinClusterSizeRatio: 0.1,
+		MaxClusterSizeRatio: 10,
+		MaxClusterSize:      1024,
+	}
+
+	var called bool
+	runner := func(ctx context.Context, info *clusteringpb.AnalyzeInfo) (analyzecgowrapper.CodecAnalyze, error) {
+		called = true
+		require.True(t, info.GetEnableGlobalIndex())
+		require.Equal(t, req.GetInsertChannel(), info.GetInsertChannel())
+		require.Contains(t, info.GetGlobalStatsIndexRoot(), "global_stats_index/100/200/by-dev-rootcoord-dml_0_100v0/2")
+		require.Contains(t, info.GetHeadIndexPath(), "global_stats_index/100/200/by-dev-rootcoord-dml_0_100v0/2/head_index")
+		require.Contains(t, info.GetChunkMappingPath(), "global_stats_index/100/200/by-dev-rootcoord-dml_0_100v0/2/chunk_mapping")
+		require.Contains(t, info.GetCompactionPlanPath(), "analyze_stats/10/2/100/200/300/compaction_pre_plan")
+		return &fakeAnalyze{}, nil
+	}
+
+	task := NewAnalyzeTask(ctx, func() {}, req, NewTaskManager(ctx))
+	task.analyzeV2Runner = runner
+	require.NoError(t, task.Execute(ctx))
+	require.True(t, called)
+	require.IsType(t, &fakeAnalyze{}, task.analyze)
 }
 
 func TestAnalyzeTaskSuite(t *testing.T) {

@@ -34,6 +34,34 @@
 
 using namespace milvus;
 
+namespace {
+
+class AnalyzeHandle {
+ public:
+    virtual ~AnalyzeHandle() = default;
+
+    virtual milvus::clustering::ClusteringResultMeta
+    GetResultMeta() = 0;
+};
+
+class KmeansAnalyzeHandle : public AnalyzeHandle {
+ public:
+    explicit KmeansAnalyzeHandle(
+        std::unique_ptr<milvus::clustering::KmeansClustering> clustering)
+        : clustering_(std::move(clustering)) {
+    }
+
+    milvus::clustering::ClusteringResultMeta
+    GetResultMeta() override {
+        return clustering_->GetClusteringResultMeta();
+    }
+
+ private:
+    std::unique_ptr<milvus::clustering::KmeansClustering> clustering_;
+};
+
+}  // namespace
+
 milvus::storage::StorageConfig
 get_storage_config(const milvus::proto::clustering::StorageConfig& config) {
     auto storage_config = milvus::storage::StorageConfig();
@@ -124,7 +152,43 @@ Analyze(CAnalyze* res_analyze,
                 fileManagerContext);
 
         clusteringJob->Run<float>(*analyze_info);
-        *res_analyze = clusteringJob.release();
+        *res_analyze = new KmeansAnalyzeHandle(std::move(clusteringJob));
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+AnalyzeV2(CAnalyze* res_analyze,
+          const uint8_t* serialized_analyze_info,
+          const uint64_t len) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        AssertInfo(res_analyze,
+                   "failed to analyze v2, result pointer was null");
+        *res_analyze = nullptr;
+
+        auto analyze_info =
+            std::make_unique<milvus::proto::clustering::AnalyzeInfo>();
+        auto res = analyze_info->ParseFromArray(serialized_analyze_info, len);
+        AssertInfo(res, "Unmarshal analyze v2 info failed");
+
+        ThrowInfo(Unsupported,
+                  "AnalyzeV2 is not wired to Knowhere yet, buildID={}",
+                  analyze_info->buildid());
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
@@ -149,8 +213,7 @@ DeleteAnalyze(CAnalyze analyze) {
     auto status = CStatus();
     try {
         AssertInfo(analyze, "failed to delete analyze, passed index was null");
-        auto real_analyze =
-            reinterpret_cast<milvus::clustering::KmeansClustering*>(analyze);
+        auto real_analyze = reinterpret_cast<AnalyzeHandle*>(analyze);
         delete real_analyze;
         status.error_code = Success;
         status.error_msg = "";
@@ -174,9 +237,8 @@ GetAnalyzeResultMeta(CAnalyze analyze,
         AssertInfo(analyze,
                    "failed to serialize analyze to binary set, passed index "
                    "was null");
-        auto real_analyze =
-            reinterpret_cast<milvus::clustering::KmeansClustering*>(analyze);
-        auto res = real_analyze->GetClusteringResultMeta();
+        auto real_analyze = reinterpret_cast<AnalyzeHandle*>(analyze);
+        auto res = real_analyze->GetResultMeta();
         *centroid_path = res.centroid_path.data();
         *centroid_file_size = res.centroid_file_size;
 

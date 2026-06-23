@@ -170,6 +170,8 @@ message AnalyzeRequest {
   int64 max_cluster_size = 17;
   int64 task_slot = 18;
   repeated common.KeyValuePair plugin_context = 19;
+  bool enable_global_index = 20;
+  string insert_channel = 21;
 }
 
 message CreateStatsRequest {
@@ -253,6 +255,9 @@ message AnalyzeResult {
   index.JobState state = 2;
   string fail_reason = 3;
   string centroids_file = 4;
+  string global_stats_index_root = 5;
+  string head_index_file = 6;
+  string compaction_plan_file = 7;
 }
 
 message AnalyzeResults {

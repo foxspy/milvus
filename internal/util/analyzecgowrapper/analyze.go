@@ -70,6 +70,34 @@ func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) (CodecA
 	return analyze, nil
 }
 
+func AnalyzeV2(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) (CodecAnalyze, error) {
+	analyzeInfoBlob, err := proto.Marshal(analyzeInfo)
+	if err != nil {
+		log.Ctx(ctx).Warn("marshal analyzeV2 info failed",
+			zap.Int64("buildID", analyzeInfo.GetBuildID()),
+			zap.Error(err))
+		return nil, err
+	}
+	var analyzePtr C.CAnalyze
+	status := C.AnalyzeV2(&analyzePtr, (*C.uint8_t)(unsafe.Pointer(&analyzeInfoBlob[0])), (C.uint64_t)(len(analyzeInfoBlob)))
+	if err := HandleCStatus(&status, "failed to analyze v2 task"); err != nil {
+		return nil, err
+	}
+
+	analyze := &CgoAnalyze{
+		analyzePtr: analyzePtr,
+		close:      false,
+	}
+
+	runtime.SetFinalizer(analyze, func(ca *CgoAnalyze) {
+		if ca != nil && !ca.close {
+			log.Error("there is leakage in analyze v2 object, please check.")
+		}
+	})
+
+	return analyze, nil
+}
+
 type CgoAnalyze struct {
 	analyzePtr C.CAnalyze
 	close      bool

@@ -47,6 +47,12 @@ message AnalyzeInfo {
   map<int64, int64> num_rows = 14;
   schema.FieldSchema field_schema = 15;
   StorageConfig storage_config = 16;
+  bool enable_global_index = 17;
+  string insert_channel = 18;
+  string global_stats_index_root = 19;
+  string head_index_path = 20;
+  string chunk_mapping_path = 21;
+  string compaction_plan_path = 22;
 }
 
 message ClusteringCentroidsStats {

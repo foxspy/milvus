@@ -178,6 +178,9 @@ func (m *analyzeMeta) FinishTask(taskID int64, result *workerpb.AnalyzeResult) e
 	cloneT.State = result.GetState()
 	cloneT.FailReason = result.GetFailReason()
 	cloneT.CentroidsFile = result.GetCentroidsFile()
+	cloneT.GlobalStatsIndexRoot = result.GetGlobalStatsIndexRoot()
+	cloneT.HeadIndexFile = result.GetHeadIndexFile()
+	cloneT.CompactionPlanFile = result.GetCompactionPlanFile()
 	return m.saveTask(cloneT)
 }
 

@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
+	"github.com/milvus-io/milvus/internal/util/globalindex"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -46,6 +47,9 @@ type analyzeTask struct {
 	queueDur time.Duration
 	manager  *TaskManager
 	analyze  analyzecgowrapper.CodecAnalyze
+
+	analyzeRunner   func(context.Context, *clusteringpb.AnalyzeInfo) (analyzecgowrapper.CodecAnalyze, error)
+	analyzeV2Runner func(context.Context, *clusteringpb.AnalyzeInfo) (analyzecgowrapper.CodecAnalyze, error)
 }
 
 func NewAnalyzeTask(ctx context.Context,
@@ -60,6 +64,9 @@ func NewAnalyzeTask(ctx context.Context,
 		req:     req,
 		manager: manager,
 		tr:      timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
+
+		analyzeRunner:   analyzecgowrapper.Analyze,
+		analyzeV2Runner: analyzecgowrapper.AnalyzeV2,
 	}
 }
 
@@ -162,7 +169,30 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		FieldSchema:     field,
 	}
 
-	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)
+	if at.req.GetEnableGlobalIndex() {
+		statsPaths := globalindex.BuildStatsIndexPaths(at.req.GetStorageConfig().GetRootPath(),
+			at.req.GetCollectionID(),
+			at.req.GetPartitionID(),
+			at.req.GetInsertChannel(),
+			at.req.GetVersion(),
+		)
+		analyzePaths := globalindex.BuildAnalyzeArtifactPaths(at.req.GetStorageConfig().GetRootPath(),
+			at.req.GetTaskID(),
+			at.req.GetVersion(),
+			at.req.GetCollectionID(),
+			at.req.GetPartitionID(),
+			at.req.GetFieldID(),
+		)
+		analyzeInfo.EnableGlobalIndex = true
+		analyzeInfo.InsertChannel = at.req.GetInsertChannel()
+		analyzeInfo.GlobalStatsIndexRoot = statsPaths.Root
+		analyzeInfo.HeadIndexPath = statsPaths.HeadIndex
+		analyzeInfo.ChunkMappingPath = statsPaths.ChunkMapping
+		analyzeInfo.CompactionPlanPath = analyzePaths.CompactionPrePlan
+	}
+
+	runner := at.selectAnalyzeRunner()
+	at.analyze, err = runner(ctx, analyzeInfo)
 	if err != nil {
 		log.Error("failed to analyze data", zap.Error(err))
 		return err
@@ -171,6 +201,19 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 	analyzeLatency := at.tr.RecordSpan()
 	log.Info("analyze done", zap.Int64("analyze cost", analyzeLatency.Milliseconds()))
 	return nil
+}
+
+func (at *analyzeTask) selectAnalyzeRunner() func(context.Context, *clusteringpb.AnalyzeInfo) (analyzecgowrapper.CodecAnalyze, error) {
+	if at.req.GetEnableGlobalIndex() {
+		if at.analyzeV2Runner != nil {
+			return at.analyzeV2Runner
+		}
+		return analyzecgowrapper.AnalyzeV2
+	}
+	if at.analyzeRunner != nil {
+		return at.analyzeRunner
+	}
+	return analyzecgowrapper.Analyze
 }
 
 func (at *analyzeTask) PostExecute(ctx context.Context) error {
@@ -191,9 +234,32 @@ func (at *analyzeTask) PostExecute(ctx context.Context) error {
 	}
 	log.Info("analyze result", zap.String("centroidsFile", centroidsFile))
 
+	var globalStatsIndexRoot, headIndexFile, compactionPlanFile string
+	if at.req.GetEnableGlobalIndex() {
+		statsPaths := globalindex.BuildStatsIndexPaths(at.req.GetStorageConfig().GetRootPath(),
+			at.req.GetCollectionID(),
+			at.req.GetPartitionID(),
+			at.req.GetInsertChannel(),
+			at.req.GetVersion(),
+		)
+		analyzePaths := globalindex.BuildAnalyzeArtifactPaths(at.req.GetStorageConfig().GetRootPath(),
+			at.req.GetTaskID(),
+			at.req.GetVersion(),
+			at.req.GetCollectionID(),
+			at.req.GetPartitionID(),
+			at.req.GetFieldID(),
+		)
+		globalStatsIndexRoot = statsPaths.Root
+		headIndexFile = statsPaths.HeadIndex
+		compactionPlanFile = analyzePaths.CompactionPrePlan
+	}
+
 	at.manager.StoreAnalyzeFilesAndStatistic(at.req.GetClusterID(),
 		at.req.GetTaskID(),
-		centroidsFile)
+		centroidsFile,
+		globalStatsIndexRoot,
+		headIndexFile,
+		compactionPlanFile)
 	at.tr.Elapse("index building all done")
 	log.Info("Successfully save analyze files")
 	return nil

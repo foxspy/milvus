@@ -26,6 +26,11 @@ Analyze(CAnalyze* res_analyze,
         const uint64_t len);
 
 CStatus
+AnalyzeV2(CAnalyze* res_analyze,
+          const uint8_t* serialized_analyze_info,
+          const uint64_t len);
+
+CStatus
 DeleteAnalyze(CAnalyze analyze);
 
 CStatus

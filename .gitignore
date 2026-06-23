@@ -130,8 +130,12 @@ WARP.md
 # Gocache
 **/.gocache/
 docs/plans/
+docs/superpowers/
 
 .worktrees/
 
 # agent context
 .context/
+
+# local global index notes
+CLUSTERING_COMPACTION_FLOW.md
