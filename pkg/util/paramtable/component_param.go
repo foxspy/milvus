@@ -5185,21 +5185,30 @@ type dataCoordConfig struct {
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
 	// Clustering Compaction
-	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
-	ClusteringCompactionAutoEnable             ParamItem `refreshable:"true"`
-	ClusteringCompactionTriggerInterval        ParamItem `refreshable:"true"`
-	ClusteringCompactionMinInterval            ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxInterval            ParamItem `refreshable:"true"`
-	ClusteringCompactionNewDataSizeThreshold   ParamItem `refreshable:"true"`
-	ClusteringCompactionPreferSegmentSizeRatio ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxSegmentSizeRatio    ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxTrainSizeRatio      ParamItem `refreshable:"true"`
-	ClusteringCompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
-	ClusteringCompactionMaxCentroidsNum        ParamItem `refreshable:"true"`
-	ClusteringCompactionMinCentroidsNum        ParamItem `refreshable:"true"`
-	ClusteringCompactionMinClusterSizeRatio    ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxClusterSizeRatio    ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxClusterSize         ParamItem `refreshable:"true"`
+	ClusteringCompactionEnable                  ParamItem `refreshable:"true"`
+	ClusteringCompactionAutoEnable              ParamItem `refreshable:"true"`
+	ClusteringCompactionTriggerInterval         ParamItem `refreshable:"true"`
+	ClusteringCompactionMinInterval             ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxInterval             ParamItem `refreshable:"true"`
+	ClusteringCompactionNewDataSizeThreshold    ParamItem `refreshable:"true"`
+	ClusteringCompactionPreferSegmentSizeRatio  ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxSegmentSizeRatio     ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxTrainSizeRatio       ParamItem `refreshable:"true"`
+	ClusteringCompactionTimeoutInSeconds        ParamItem `refreshable:"true"` // deprecated
+	ClusteringCompactionMaxCentroidsNum         ParamItem `refreshable:"true"`
+	ClusteringCompactionMinCentroidsNum         ParamItem `refreshable:"true"`
+	ClusteringCompactionMinClusterSizeRatio     ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSizeRatio     ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSize          ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalIndexEnable       ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalTrainMethod       ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalAssignMethod      ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalCompactionMaxRows ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalCompactionMinRows ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalKmeansMaxIter     ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalKmeansRandomState ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalKmeansFastMode    ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalKmeansFastEpsilon ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
@@ -6049,6 +6058,87 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.ClusteringCompactionMaxClusterSize.Init(base.mgr)
+
+	p.ClusteringCompactionGlobalIndexEnable = ParamItem{
+		Key:          "dataCoord.compaction.clustering.globalIndex.enable",
+		Version:      "2.7.0",
+		DefaultValue: "false",
+		Doc:          "Enable global index analyze and compaction planning for vector clustering compaction",
+		Export:       true,
+	}
+	p.ClusteringCompactionGlobalIndexEnable.Init(base.mgr)
+
+	p.ClusteringCompactionGlobalTrainMethod = ParamItem{
+		Key:          "dataCoord.compaction.clustering.globalIndex.trainMethod",
+		Version:      "2.7.0",
+		DefaultValue: "index",
+		Doc:          "Cardinal global index train method for AnalyzeV2",
+		Export:       true,
+	}
+	p.ClusteringCompactionGlobalTrainMethod.Init(base.mgr)
+
+	p.ClusteringCompactionGlobalAssignMethod = ParamItem{
+		Key:          "dataCoord.compaction.clustering.globalIndex.assignMethod",
+		Version:      "2.7.0",
+		DefaultValue: "index",
+		Doc:          "Cardinal global index assign method for AnalyzeV2",
+		Export:       true,
+	}
+	p.ClusteringCompactionGlobalAssignMethod.Init(base.mgr)
+
+	p.ClusteringCompactionGlobalCompactionMaxRows = ParamItem{
+		Key:          "dataCoord.compaction.clustering.globalIndex.compactionMaxRows",
+		Version:      "2.7.0",
+		DefaultValue: "0",
+		Doc:          "Target max rows per AnalyzeV2 compaction group. Zero uses max segment rows",
+		Export:       true,
+	}
+	p.ClusteringCompactionGlobalCompactionMaxRows.Init(base.mgr)
+
+	p.ClusteringCompactionGlobalCompactionMinRows = ParamItem{
+		Key:          "dataCoord.compaction.clustering.globalIndex.compactionMinRows",
+		Version:      "2.7.0",
+		DefaultValue: "0",
+		Doc:          "Target min rows for AnalyzeV2 compaction group packing",
+		Export:       true,
+	}
+	p.ClusteringCompactionGlobalCompactionMinRows.Init(base.mgr)
+
+	p.ClusteringCompactionGlobalKmeansMaxIter = ParamItem{
+		Key:          "dataCoord.compaction.clustering.globalIndex.kmeansMaxIter",
+		Version:      "2.7.0",
+		DefaultValue: "10",
+		Doc:          "Max kmeans iterations for AnalyzeV2 Cardinal clustering",
+		Export:       true,
+	}
+	p.ClusteringCompactionGlobalKmeansMaxIter.Init(base.mgr)
+
+	p.ClusteringCompactionGlobalKmeansRandomState = ParamItem{
+		Key:          "dataCoord.compaction.clustering.globalIndex.kmeansRandomState",
+		Version:      "2.7.0",
+		DefaultValue: "0",
+		Doc:          "Random state for AnalyzeV2 Cardinal clustering",
+		Export:       true,
+	}
+	p.ClusteringCompactionGlobalKmeansRandomState.Init(base.mgr)
+
+	p.ClusteringCompactionGlobalKmeansFastMode = ParamItem{
+		Key:          "dataCoord.compaction.clustering.globalIndex.kmeansFastMode",
+		Version:      "2.7.0",
+		DefaultValue: "0",
+		Doc:          "Cardinal kmeansfast mode for AnalyzeV2",
+		Export:       true,
+	}
+	p.ClusteringCompactionGlobalKmeansFastMode.Init(base.mgr)
+
+	p.ClusteringCompactionGlobalKmeansFastEpsilon = ParamItem{
+		Key:          "dataCoord.compaction.clustering.globalIndex.kmeansFastEpsilon",
+		Version:      "2.7.0",
+		DefaultValue: "1.5",
+		Doc:          "Cardinal kmeansfast epsilon for AnalyzeV2",
+		Export:       true,
+	}
+	p.ClusteringCompactionGlobalKmeansFastEpsilon.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",

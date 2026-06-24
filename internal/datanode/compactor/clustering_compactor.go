@@ -18,6 +18,7 @@ package compactor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	sio "io"
 	"math"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/globalindex"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -114,6 +116,7 @@ type ClusterBuffer struct {
 	id                      int
 	writer                  *MultiSegmentWriter
 	clusteringKeyFieldStats *storage.FieldStats
+	centroidIDs             []int64
 
 	lock sync.RWMutex
 }
@@ -414,12 +417,84 @@ func splitCentroids(centroids []int, num int) ([][]int, map[int]int) {
 	return result, resultIndex
 }
 
-func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, bufferNum int, centroids []*schemapb.VectorField) error {
-	centroidsOffset := make([]int, len(centroids))
-	for i := 0; i < len(centroids); i++ {
-		centroidsOffset[i] = i
+type globalIVFCompactionPlan struct {
+	Format        string                     `json:"format"`
+	CentroidCount int                        `json:"centroid_count"`
+	Groups        []globalIVFCompactionGroup `json:"groups"`
+}
+
+type globalIVFCompactionGroup struct {
+	GroupID   int   `json:"group_id"`
+	Centroids []int `json:"centroids"`
+	Rows      int64 `json:"rows"`
+}
+
+func (t *clusteringCompactionTask) loadGlobalIVFCompactionPlan(ctx context.Context, centroidCount int) ([][]int, error) {
+	compactionPlanFile := t.plan.GetCompactionPlanFile()
+	if compactionPlanFile == "" {
+		return nil, merr.WrapErrIllegalCompactionPlan("global index compaction plan file is empty")
 	}
-	centroidGroups, groupIndex := splitCentroids(centroidsOffset, bufferNum)
+	planBytes, err := t.binlogIO.Download(ctx, []string{compactionPlanFile})
+	if err != nil {
+		return nil, merr.Wrapf(err, "download global index compaction plan %q", compactionPlanFile)
+	}
+	if len(planBytes) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("global index compaction plan %q is empty", compactionPlanFile)
+	}
+
+	var plan globalIVFCompactionPlan
+	if err := json.Unmarshal(planBytes[0], &plan); err != nil {
+		return nil, merr.WrapErrServiceInternalErr(err, "parse global index compaction plan %q", compactionPlanFile)
+	}
+	if plan.CentroidCount != centroidCount {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"global index compaction plan centroid count mismatch, plan=%d, centroids=%d",
+			plan.CentroidCount,
+			centroidCount)
+	}
+	if len(plan.Groups) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("global index compaction plan has no groups")
+	}
+
+	seen := make(map[int]struct{}, centroidCount)
+	centroidGroups := make([][]int, 0, len(plan.Groups))
+	for _, group := range plan.Groups {
+		if len(group.Centroids) == 0 {
+			continue
+		}
+		centroids := make([]int, 0, len(group.Centroids))
+		for _, centroidID := range group.Centroids {
+			if centroidID < 0 || centroidID >= centroidCount {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"global index compaction plan centroid id out of range, centroidID=%d, centroidCount=%d",
+					centroidID,
+					centroidCount)
+			}
+			if _, ok := seen[centroidID]; ok {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"global index compaction plan has duplicated centroid id %d",
+					centroidID)
+			}
+			seen[centroidID] = struct{}{}
+			centroids = append(centroids, centroidID)
+		}
+		centroidGroups = append(centroidGroups, centroids)
+	}
+	if len(seen) != centroidCount {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"global index compaction plan does not cover all centroids, plan=%d, assigned=%d",
+			centroidCount,
+			len(seen))
+	}
+	if len(centroidGroups) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("global index compaction plan has no non-empty groups")
+	}
+
+	return centroidGroups, nil
+}
+
+func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, centroidGroups [][]int, centroids []*schemapb.VectorField) error {
+	groupIndex := make(map[int]int, len(centroids))
 	for id, group := range centroidGroups {
 		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
 		if err != nil {
@@ -428,7 +503,11 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 
 		centroidValues := make([]storage.VectorFieldValue, len(group))
 		for i, offset := range group {
+			if offset < 0 || offset >= len(centroids) {
+				return merr.WrapErrServiceInternalMsg("centroid offset out of range, offset=%d, centroidNum=%d", offset, len(centroids))
+			}
 			centroidValues[i] = storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroids[offset])
+			groupIndex[offset] = id
 		}
 
 		fieldStats.SetVectorCentroids(centroidValues...)
@@ -444,22 +523,48 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		}
 
 		buffer := newClusterBuffer(id, writer, fieldStats)
+		buffer.centroidIDs = lo.Map(group, func(centroidID int, _ int) int64 {
+			return int64(centroidID)
+		})
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
 	}
 	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
-		centroidGroupOffset := groupIndex[int(idMapping[offset])]
+		if offset < 0 || offset >= int64(len(idMapping)) {
+			return nil
+		}
+		centroidGroupOffset, ok := groupIndex[int(idMapping[offset])]
+		if !ok {
+			return nil
+		}
 		return t.clusterBuffers[centroidGroupOffset]
 	}
 	return nil
 }
 
 func (t *clusteringCompactionTask) switchPolicyForVectorPlan(ctx context.Context, centroids *clusteringpb.ClusteringCentroidsStats) error {
-	bufferNum := len(centroids.GetCentroids())
+	centroidNum := len(centroids.GetCentroids())
+	if t.plan.GetEnableGlobalIndex() {
+		centroidGroups, err := t.loadGlobalIVFCompactionPlan(ctx, centroidNum)
+		if err != nil {
+			return err
+		}
+		return t.generatedVectorPlan(ctx, centroidGroups, centroids.GetCentroids())
+	}
+
+	bufferNum := centroidNum
 	bufferNumByMemory := int(t.memoryLimit / expectedBinlogSize)
 	if bufferNumByMemory < bufferNum {
 		bufferNum = bufferNumByMemory
 	}
-	return t.generatedVectorPlan(ctx, bufferNum, centroids.GetCentroids())
+	if bufferNum <= 0 {
+		bufferNum = 1
+	}
+	centroidsOffset := make([]int, centroidNum)
+	for i := 0; i < centroidNum; i++ {
+		centroidsOffset[i] = i
+	}
+	centroidGroups, _ := splitCentroids(centroidsOffset, bufferNum)
+	return t.generatedVectorPlan(ctx, centroidGroups, centroids.GetCentroids())
 }
 
 func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) error {
@@ -525,6 +630,9 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := t.uploadGlobalStatsChunkMapping(ctx); err != nil {
+		return nil, nil, err
+	}
 
 	resultSegments := make([]*datapb.CompactionSegment, 0)
 	resultPartitionStats := &storage.PartitionStatsSnapshot{
@@ -553,6 +661,60 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 		zap.Duration("elapse", time.Since(mapStart)))
 
 	return resultSegments, resultPartitionStats, nil
+}
+
+func (t *clusteringCompactionTask) uploadGlobalStatsChunkMapping(ctx context.Context) error {
+	root := t.plan.GetGlobalStatsIndexRoot()
+	if !t.isVectorClusteringKey || root == "" {
+		return nil
+	}
+
+	mapping := make(globalindex.ChunkMapping)
+	for _, buffer := range t.clusterBuffers {
+		if len(buffer.centroidIDs) == 0 {
+			continue
+		}
+
+		segments := buffer.GetCompactionSegments()
+		chunks := make([]globalindex.Chunk, 0, len(segments))
+		for _, segment := range segments {
+			if segment.GetNumOfRows() <= 0 {
+				continue
+			}
+			chunks = append(chunks, globalindex.Chunk{
+				SegmentID: segment.GetSegmentID(),
+				Offset:    0,
+				Size:      segment.GetNumOfRows(),
+			})
+		}
+		if len(chunks) == 0 {
+			continue
+		}
+
+		for _, centroidID := range buffer.centroidIDs {
+			mapping[centroidID] = append(mapping[centroidID], chunks...)
+		}
+	}
+	if len(mapping) == 0 {
+		if t.writtenRowNum.Load() == 0 {
+			return nil
+		}
+		return merr.WrapErrServiceInternalMsg("global stats chunk mapping is empty, root=%s", root)
+	}
+
+	mappingBytes, err := json.Marshal(mapping)
+	if err != nil {
+		return merr.Wrap(err, "marshal global stats chunk mapping")
+	}
+	chunkMappingPath := path.Join(root, common.GlobalStatsChunkMapping)
+	if err := t.binlogIO.Upload(ctx, map[string][]byte{chunkMappingPath: mappingBytes}); err != nil {
+		return merr.Wrapf(err, "upload global stats chunk mapping %q", chunkMappingPath)
+	}
+	log.Ctx(ctx).Info("uploaded global stats chunk mapping",
+		zap.String("path", chunkMappingPath),
+		zap.Int("centroidCount", len(mapping)),
+		zap.Int("bytes", len(mappingBytes)))
+	return nil
 }
 
 func (t *clusteringCompactionTask) getBufferTotalUsedMemorySize() int64 {
@@ -688,6 +850,12 @@ func (t *clusteringCompactionTask) mappingSegment(
 				clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
 			} else {
 				clusterBuffer = t.keyToBufferFunc(clusteringKey)
+			}
+			if clusterBuffer == nil {
+				return merr.WrapErrServiceInternalMsg(
+					"failed to find clustering buffer, segmentID=%d, offset=%d",
+					segment.GetSegmentID(),
+					offset)
 			}
 			if err := clusterBuffer.Write(v); err != nil {
 				return err

@@ -2301,6 +2301,46 @@ func validateCompactionFallbackStartPosition(compactFromSegInfos []*SegmentInfo,
 		maxCommitTs)
 }
 
+type globalStatsIndexInfo struct {
+	root         string
+	headIndex    string
+	chunkMapping string
+}
+
+func compactionGlobalStatsIndexInfo(t *datapb.CompactionTask, inputs []*SegmentInfo) (globalStatsIndexInfo, error) {
+	if t.GetEnableGlobalIndex() || t.GetGlobalStatsIndexRoot() != "" || t.GetHeadIndexFile() != "" {
+		info := globalStatsIndexInfo{
+			root:      t.GetGlobalStatsIndexRoot(),
+			headIndex: t.GetHeadIndexFile(),
+		}
+		if info.root != "" {
+			info.chunkMapping = path.Join(info.root, common.GlobalStatsChunkMapping)
+		}
+		return info, nil
+	}
+
+	var info globalStatsIndexInfo
+	for _, input := range inputs {
+		if input.GetGlobalStatsIndexRoot() == "" && input.GetHeadIndexFile() == "" && input.GetChunkMappingFile() == "" {
+			continue
+		}
+		candidate := globalStatsIndexInfo{
+			root:         input.GetGlobalStatsIndexRoot(),
+			headIndex:    input.GetHeadIndexFile(),
+			chunkMapping: input.GetChunkMappingFile(),
+		}
+		if info == (globalStatsIndexInfo{}) {
+			info = candidate
+			continue
+		}
+		if info != candidate {
+			return globalStatsIndexInfo{}, merr.WrapErrServiceInternalMsg(
+				"compaction input segments reference different global stats indexes")
+		}
+	}
+	return info, nil
+}
+
 func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetPlanID()),
 		zap.String("type", t.GetType().String()),
@@ -2352,6 +2392,10 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetDmlPosition()
 	}))
+	globalStatsInfo, err := compactionGlobalStatsIndexInfo(t, compactFromSegInfos)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	for _, seg := range result.GetSegments() {
 		startPos, dmlPos := recalculateSegmentPosition(seg.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
@@ -2372,12 +2416,15 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			StartPosition:       startPos,
 			DmlPosition:         dmlPos,
 			// visible after stats and index
-			IsInvisible:     true,
-			StorageVersion:  seg.GetStorageVersion(),
-			ManifestPath:    seg.GetManifest(),
-			ExpirQuantiles:  seg.GetExpirQuantiles(),
-			SchemaVersion:   t.GetSchema().GetVersion(),
-			CommitTimestamp: 0, // Normalized: row timestamps already rewritten
+			IsInvisible:          true,
+			StorageVersion:       seg.GetStorageVersion(),
+			ManifestPath:         seg.GetManifest(),
+			ExpirQuantiles:       seg.GetExpirQuantiles(),
+			SchemaVersion:        t.GetSchema().GetVersion(),
+			CommitTimestamp:      0, // Normalized: row timestamps already rewritten
+			GlobalStatsIndexRoot: globalStatsInfo.root,
+			HeadIndexFile:        globalStatsInfo.headIndex,
+			ChunkMappingFile:     globalStatsInfo.chunkMapping,
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -2480,6 +2527,10 @@ func (m *meta) completeMixCompactionMutation(
 	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetDmlPosition()
 	}))
+	globalStatsInfo, err := compactionGlobalStatsIndexInfo(t, compactFromSegInfos)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
@@ -2499,19 +2550,22 @@ func (m *meta) completeMixCompactionMutation(
 				Bm25Statslogs: compactToSegment.GetBm25Logs(),
 				TextStatsLogs: compactToSegment.GetTextStatsLogs(),
 
-				CreatedByCompaction: true,
-				CompactionFrom:      compactFromSegIDs,
-				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
-				Level:               datapb.SegmentLevel_L1,
-				StorageVersion:      compactToSegment.GetStorageVersion(),
-				StartPosition:       startPos,
-				DmlPosition:         dmlPos,
-				IsSorted:            compactToSegment.GetIsSorted(),
-				ManifestPath:        compactToSegment.GetManifest(),
-				IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
-				ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
-				SchemaVersion:       outputSchemaVersion,
-				CommitTimestamp:     0, // Normalized: row timestamps already rewritten
+				CreatedByCompaction:  true,
+				CompactionFrom:       compactFromSegIDs,
+				LastExpireTime:       tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
+				Level:                datapb.SegmentLevel_L1,
+				StorageVersion:       compactToSegment.GetStorageVersion(),
+				StartPosition:        startPos,
+				DmlPosition:          dmlPos,
+				IsSorted:             compactToSegment.GetIsSorted(),
+				ManifestPath:         compactToSegment.GetManifest(),
+				IsSortedByNamespace:  compactToSegment.GetIsSortedByNamespace(),
+				ExpirQuantiles:       compactToSegment.GetExpirQuantiles(),
+				SchemaVersion:        outputSchemaVersion,
+				CommitTimestamp:      0, // Normalized: row timestamps already rewritten
+				GlobalStatsIndexRoot: globalStatsInfo.root,
+				HeadIndexFile:        globalStatsInfo.headIndex,
+				ChunkMappingFile:     globalStatsInfo.chunkMapping,
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -3204,6 +3258,10 @@ func (m *meta) completeSortCompactionMutation(
 		return nil, nil, merr.WrapErrIllegalCompactionPlan("sort compaction task schema is nil")
 	}
 	outputSchemaVersion := t.GetSchema().GetVersion()
+	globalStatsInfo, err := compactionGlobalStatsIndexInfo(t, []*SegmentInfo{oldSegment})
+	if err != nil {
+		return nil, nil, err
+	}
 
 	segmentInfo := &datapb.SegmentInfo{
 		CollectionID:              oldSegment.GetCollectionID(),
@@ -3236,6 +3294,9 @@ func (m *meta) completeSortCompactionMutation(
 		IsSortedByNamespace:       resultSegment.GetIsSortedByNamespace(),
 		SchemaVersion:             outputSchemaVersion,
 		CommitTimestamp:           0, // Normalized: row timestamps already rewritten
+		GlobalStatsIndexRoot:      globalStatsInfo.root,
+		HeadIndexFile:             globalStatsInfo.headIndex,
+		ChunkMappingFile:          globalStatsInfo.chunkMapping,
 	}
 
 	segment := NewSegmentInfo(segmentInfo)
@@ -3438,6 +3499,9 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
 		IsSortedByNamespace:       oldSegment.GetIsSortedByNamespace(),
 		SchemaVersion:             schemaVersion,
+		GlobalStatsIndexRoot:      oldSegment.GetGlobalStatsIndexRoot(),
+		HeadIndexFile:             oldSegment.GetHeadIndexFile(),
+		ChunkMappingFile:          oldSegment.GetChunkMappingFile(),
 	})
 	if newSegment.GetNumOfRows() > 0 {
 		metricMutation.addNewSeg(newSegment.GetState(), newSegment.GetLevel(), newSegment.GetIsSorted(), newSegment.GetStorageVersion(), segmentMetricFormatLabel(newSegment), newSegment.GetNumOfRows())

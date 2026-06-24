@@ -30,6 +30,20 @@ message InsertFiles {
   repeated string insert_files = 1;
 }
 
+message FieldInsertFiles {
+  repeated string file_paths = 1;
+}
+
+message SegmentInsertFiles {
+  repeated FieldInsertFiles field_insert_files = 1;
+}
+
+message SegmentStorageInfo {
+  int64 storage_version = 1;
+  SegmentInsertFiles segment_insert_files = 2;
+  string manifest = 3;
+}
+
 message AnalyzeInfo {
   string clusterID = 1;
   int64 buildID = 2;
@@ -53,6 +67,15 @@ message AnalyzeInfo {
   string head_index_path = 20;
   string chunk_mapping_path = 21;
   string compaction_plan_path = 22;
+  string global_train_method = 23;
+  string global_assign_method = 24;
+  int64 compaction_max_rows = 25;
+  int64 compaction_min_rows = 26;
+  int64 kmeans_max_iter = 27;
+  int64 kmeans_random_state = 28;
+  int64 kmeans_fast_mode = 29;
+  double kmeans_fast_epsilon = 30;
+  map<int64, SegmentStorageInfo> segment_storage_infos = 31;
 }
 
 message ClusteringCentroidsStats {
@@ -62,4 +85,5 @@ message ClusteringCentroidsStats {
 message ClusteringCentroidIdMappingStats {
   repeated uint32 centroid_id_mapping = 1;
   repeated int64 num_in_centroid = 2;
+  repeated float distance_to_centroid = 3;
 }

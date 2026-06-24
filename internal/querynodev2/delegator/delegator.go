@@ -153,15 +153,18 @@ type shardDelegator struct {
 	tsCond      *syncutil.ContextCond
 	latestTsafe *atomic.Uint64
 	// queryHook
-	queryHook      optimizers.QueryHook
-	partitionStats map[UniqueID]*storage.PartitionStatsSnapshot
-	chunkManager   storage.ChunkManager
+	queryHook          optimizers.QueryHook
+	partitionStats     map[UniqueID]*storage.PartitionStatsSnapshot
+	chunkManager       storage.ChunkManager
+	globalStatsIndexes map[string]*loadedGlobalStatsIndex
+	segmentGlobalStats map[int64]string
 
 	excludedSegments *ExcludedSegments
 	// cause growing segment meta has been stored in segmentManager/distribution/excludeSegments
 	// in order to make add/remove growing be atomic, need lock before modify these meta info
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
+	globalStatsMut     sync.RWMutex
 
 	functionState *functionRuntimeState
 
@@ -366,6 +369,15 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		growing = []SegmentEntry{}
 	}
 
+	if roots := sd.globalStatsRootsForSealedSegments(sealed); len(roots) > 0 {
+		if err := sd.validateGlobalStatsChunkMappings(roots, sealed, sealedRowCount); err != nil {
+			return nil, err
+		}
+		log.Debug("global stats index is loaded for search",
+			zap.Strings("globalStatsIndexRoots", roots),
+			zap.Int64("fieldID", req.GetReq().GetFieldId()))
+	}
+
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
 		func() {
 			sd.partitionStatsMut.RLock()
@@ -383,6 +395,15 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 			req.GetReq().GetCollectionID(),
 			metrics.SearchLabel,
 		)
+	}
+
+	if plannedSealed, applied, err := sd.planGlobalStatsSearch(ctx, req, sealed, sealedRowCount); err != nil {
+		return nil, err
+	} else if applied {
+		log.Debug("global stats head index planned sealed search segments",
+			zap.Int("before", lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })),
+			zap.Int("after", lo.SumBy(plannedSealed, func(item SnapshotItem) int { return len(item.Segments) })))
+		sealed = plannedSealed
 	}
 
 	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, req.GetReq())
@@ -1472,6 +1493,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		queryHook:                  queryHook,
 		chunkManager:               chunkManager,
 		partitionStats:             make(map[UniqueID]*storage.PartitionStatsSnapshot),
+		globalStatsIndexes:         make(map[string]*loadedGlobalStatsIndex),
+		segmentGlobalStats:         make(map[int64]string),
 		excludedSegments:           excludedSegments,
 		l0ForwardPolicy:            policy,
 		postLoadSem:                postLoadSem,

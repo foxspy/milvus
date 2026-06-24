@@ -128,6 +128,22 @@ SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set);
 CStatus
 LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set);
 
+CStatus
+LoadCardinalHeadIndex(CCardinalHeadIndex* res_index,
+                      CStorageConfig storage_config,
+                      const char* head_index_path);
+
+CStatus
+SearchCardinalHeadIndex(CCardinalHeadIndex index,
+                        const float* query,
+                        int64_t nq,
+                        int64_t dim,
+                        int64_t topk,
+                        int64_t* ids);
+
+CStatus
+DeleteCardinalHeadIndex(CCardinalHeadIndex index);
+
 #ifdef __cplusplus
 };
 #endif

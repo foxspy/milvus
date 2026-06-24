@@ -982,4 +982,24 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 		s.Equal(datapb.CompactionTaskState_indexing, task.GetTaskProto().GetState())
 		s.Equal(int32(0), task.GetTaskProto().RetryTimes)
 	})
+
+	s.Run("global index skips stats sort compaction", func() {
+		task := s.generateBasicTask(false)
+		tmpSegments := task.GetTaskProto().GetResultSegments()
+		task.updateAndSaveTaskMeta(
+			setState(datapb.CompactionTaskState_statistic),
+			setTmpSegments(tmpSegments),
+			setResultSegments(nil),
+			func(task *datapb.CompactionTask) {
+				task.EnableGlobalIndex = true
+				task.GlobalStatsIndexRoot = "global_stats_index/root"
+			},
+		)
+		task.maxRetryTimes = 3
+
+		s.False(task.Process())
+		s.Equal(datapb.CompactionTaskState_indexing, task.GetTaskProto().GetState())
+		s.Equal(tmpSegments, task.GetTaskProto().GetResultSegments())
+		s.Equal(int32(0), task.GetTaskProto().RetryTimes)
+	})
 }

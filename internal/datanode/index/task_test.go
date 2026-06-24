@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -328,6 +329,19 @@ func TestAnalyzeTaskExecuteUsesAnalyzeV2RunnerForGlobalIndex(t *testing.T) {
 			RootPath:    "/root",
 			StorageType: "local",
 		},
+		SegmentStorageInfos: map[int64]*workerpb.AnalyzeSegmentStorageInfo{
+			400: {
+				StorageVersion: storage.StorageV2,
+				InsertLogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 0,
+						Binlogs: []*datapb.Binlog{
+							{LogID: 600},
+						},
+					},
+				},
+			},
+		},
 		Dim:                 128,
 		NumClusters:         16,
 		MaxTrainSizeRatio:   0.2,
@@ -345,6 +359,10 @@ func TestAnalyzeTaskExecuteUsesAnalyzeV2RunnerForGlobalIndex(t *testing.T) {
 		require.Contains(t, info.GetHeadIndexPath(), "global_stats_index/100/200/by-dev-rootcoord-dml_0_100v0/2/head_index")
 		require.Contains(t, info.GetChunkMappingPath(), "global_stats_index/100/200/by-dev-rootcoord-dml_0_100v0/2/chunk_mapping")
 		require.Contains(t, info.GetCompactionPlanPath(), "analyze_stats/10/2/100/200/300/compaction_pre_plan")
+		require.Equal(t, int64(storage.StorageV2), info.GetSegmentStorageInfos()[400].GetStorageVersion())
+		require.Equal(t, []string{
+			metautil.BuildInsertLogPath("/root", 100, 200, 400, 0, 600),
+		}, info.GetSegmentStorageInfos()[400].GetSegmentInsertFiles().GetFieldInsertFiles()[0].GetFilePaths())
 		return &fakeAnalyze{}, nil
 	}
 

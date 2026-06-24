@@ -55,6 +55,10 @@ class KmeansClustering {
     void
     Run(const milvus::proto::clustering::AnalyzeInfo& config);
 
+    template <typename T>
+    void
+    RunV2(const milvus::proto::clustering::AnalyzeInfo& config);
+
     // should never be called before run
     ClusteringResultMeta
     GetClusteringResultMeta() {
@@ -121,12 +125,17 @@ class KmeansClustering {
 
     template <typename T>
     void
-    FetchDataFiles(uint8_t* buf,
-                   const int64_t expected_train_size,
-                   const int64_t expected_remote_file_size,
-                   const std::vector<std::string>& files,
-                   const int64_t dim,
-                   int64_t& offset);
+    FetchDataFiles(
+        uint8_t* buf,
+        const int64_t expected_train_size,
+        const int64_t expected_remote_file_size,
+        const std::vector<std::string>& files,
+        const milvus::proto::clustering::SegmentStorageInfo* storage_info,
+        const int64_t segment_id,
+        const size_t storage_info_map_size,
+        const int64_t first_storage_info_key,
+        const int64_t dim,
+        int64_t& offset);
 
     // given all possible segments, sample data to buffer
     template <typename T>
@@ -134,6 +143,8 @@ class KmeansClustering {
     SampleTrainData(
         const std::vector<int64_t>& segment_ids,
         const std::map<int64_t, std::vector<std::string>>& segment_file_paths,
+        const std::map<int64_t, milvus::proto::clustering::SegmentStorageInfo>&
+            segment_storage_infos,
         const std::map<int64_t, int64_t>& segment_num_rows,
         const int64_t expected_train_size,
         const int64_t dim,
@@ -154,6 +165,12 @@ class KmeansClustering {
                           const int64_t trained_segments_num,
                           const std::map<int64_t, int64_t>& num_row_map,
                           const int64_t num_clusters);
+
+    milvus::proto::clustering::ClusteringCentroidIdMappingStats
+    CentroidIdMappingWithDistanceToPB(const int64_t* centroid_id_mapping,
+                                      const float* distances,
+                                      const int64_t num_rows,
+                                      const int64_t num_clusters);
 
     template <typename T>
     bool

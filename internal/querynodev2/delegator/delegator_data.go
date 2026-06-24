@@ -616,6 +616,11 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Debug("work loads segments done")
 
+	if err := sd.loadGlobalStatsIndexes(ctx, req.GetInfos()); err != nil {
+		log.Warn("failed to load global stats index", zap.Error(err))
+		return err
+	}
+
 	if err := sd.syncCollectionIndexMeta(ctx, req); err != nil {
 		log.Warn("failed to sync collection index meta on delegator", zap.Error(err))
 		return err
@@ -1093,6 +1098,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	signal := sd.distribution.RemoveDistributions(sealed, growing)
 	// wait cleared signal
 	<-signal
+	sd.releaseGlobalStatsSegments(req.GetSegmentIDs()...)
 
 	if len(growing) > 0 {
 		sd.growingSegmentLock.Lock()

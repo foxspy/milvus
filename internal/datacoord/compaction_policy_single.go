@@ -116,6 +116,12 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 		log.Info("skip sort compaction for external collection", zap.Int64("collectionID", collection.ID))
 		return nil
 	}
+	if hasGlobalStatsIndex(segment) {
+		log.Info("skip sort compaction for global index segment",
+			zap.Int64("collectionID", segment.GetCollectionID()),
+			zap.String("globalStatsIndexRoot", segment.GetGlobalStatsIndexRoot()))
+		return nil
+	}
 	if !canTriggerSortCompaction(segment) {
 		log.Warn("fail to apply triggerSegmentSortCompaction",
 			zap.String("state", segment.GetState().String()),
@@ -188,6 +194,7 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 	triggerableSegments := policy.meta.SelectSegments(ctx, WithCollection(collectionID),
 		SegmentFilterFunc(func(seg *SegmentInfo) bool {
 			return canTriggerSortCompaction(seg) &&
+				!hasGlobalStatsIndex(seg) &&
 				!policy.meta.isSegmentCompactionProtected(seg.GetID())
 		}))
 	if len(triggerableSegments) == 0 {
@@ -310,6 +317,12 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 			zap.Int("triggered view num", len(views)))
 	}
 	return views, sortViews, newTriggerID, nil
+}
+
+func hasGlobalStatsIndex(segment *SegmentInfo) bool {
+	return segment.GetGlobalStatsIndexRoot() != "" ||
+		segment.GetHeadIndexFile() != "" ||
+		segment.GetChunkMappingFile() != ""
 }
 
 var _ CompactionView = (*MixSegmentView)(nil)

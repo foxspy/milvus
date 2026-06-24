@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CompactionTriggerType int8
@@ -473,6 +474,9 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 	now := time.Now().Unix()
+	clusteringKeyField := view.(*ClusteringSegmentsView).clusteringKeyField
+	enableGlobalIndex := paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalIndexEnable.GetAsBool() &&
+		typeutil.IsVectorType(clusteringKeyField.GetDataType())
 	task := &datapb.CompactionTask{
 		PlanID:                 planID,
 		TriggerID:              view.(*ClusteringSegmentsView).triggerID,
@@ -484,7 +488,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		PartitionID:            view.GetGroupLabel().PartitionID,
 		Channel:                view.GetGroupLabel().Channel,
 		Schema:                 collection.Schema,
-		ClusteringKeyField:     view.(*ClusteringSegmentsView).clusteringKeyField,
+		ClusteringKeyField:     clusteringKeyField,
 		InputSegments:          lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
 		ResultSegments:         []int64{},
 		MaxSegmentRows:         maxSegmentRows,
@@ -494,6 +498,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		LastStateStartTime:     now,
 		PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 		MaxSize:                expectedSegmentSize,
+		EnableGlobalIndex:      enableGlobalIndex,
 	}
 	err = m.inspector.enqueueCompaction(task)
 	if err != nil {

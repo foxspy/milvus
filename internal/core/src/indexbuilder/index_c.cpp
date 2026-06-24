@@ -24,6 +24,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "common/type_c.h"
 #include "filemanager/InputStream.h"
@@ -39,6 +40,8 @@
 #include "indexbuilder/type_c.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/dataset.h"
+#include "knowhere/index/index_factory.h"
+#include "knowhere/operands.h"
 #include "knowhere/version.h"
 #include "log/Log.h"
 #include "monitor/scope_metric.h"
@@ -48,12 +51,91 @@
 #include "pb/schema.pb.h"
 #include "storage/FileManager.h"
 #include "storage/PluginLoader.h"
+#include "storage/RemoteInputStream.h"
+#include "storage/StorageV2FSCache.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/util.h"
 #include "storage/plugin/PluginInterface.h"
 
 using namespace milvus;
+
+namespace {
+
+class GlobalHeadIndexFileManager : public milvus::FileManager {
+ public:
+    GlobalHeadIndexFileManager(milvus_storage::ArrowFileSystemPtr fs,
+                               std::string head_index_path)
+        : fs_(std::move(fs)), head_index_path_(std::move(head_index_path)) {
+    }
+
+    bool
+    LoadFile(const std::string&) override {
+        return true;
+    }
+
+    bool
+    AddFile(const std::string&) override {
+        return false;
+    }
+
+    bool
+    AddFileMeta(const milvus::FileMeta&) override {
+        return true;
+    }
+
+    std::optional<bool>
+    IsExisted(const std::string&) override {
+        return true;
+    }
+
+    bool
+    RemoveFile(const std::string&) override {
+        return false;
+    }
+
+    std::shared_ptr<milvus::InputStream>
+    OpenInputStream(const std::string&) override {
+        auto remote_file = fs_->OpenInputFile(head_index_path_);
+        AssertInfo(remote_file.ok(),
+                   "failed to open global head index {}, reason: {}",
+                   head_index_path_,
+                   remote_file.status().ToString());
+        return std::static_pointer_cast<milvus::InputStream>(
+            std::make_shared<milvus::storage::RemoteInputStream>(
+                std::move(remote_file.ValueOrDie())));
+    }
+
+    std::shared_ptr<milvus::OutputStream>
+    OpenOutputStream(const std::string&) override {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "global head index file manager is read-only");
+    }
+
+ private:
+    milvus_storage::ArrowFileSystemPtr fs_;
+    std::string head_index_path_;
+};
+
+struct CardinalHeadIndexHandle {
+    knowhere::Index<knowhere::IndexNode> index;
+    std::shared_ptr<GlobalHeadIndexFileManager> file_manager;
+};
+
+knowhere::Json
+BuildHeadIndexKnowhereConfig(int64_t dim, int64_t topk) {
+    knowhere::Json config;
+    config[knowhere::meta::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    config[knowhere::meta::METRIC_TYPE] = knowhere::metric::L2;
+    config[knowhere::meta::DIM] = dim;
+    config[knowhere::meta::TOPK] = topk;
+    config[knowhere::meta::INDEX_PREFIX] = "global_head_index";
+    config[knowhere::meta::INDEX_ENGINE_VERSION] = 9;
+    return config;
+}
+
+}  // namespace
+
 CStatus
 CreateIndexForUT(enum CDataType dtype,
                  const char* serialized_type_params,
@@ -1042,6 +1124,197 @@ SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result) {
         auto create_index_result = real_index->Upload();
         create_index_result->SerializeAt(
             reinterpret_cast<milvus::ProtoLayout*>(result));
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
+LoadCardinalHeadIndex(CCardinalHeadIndex* res_index,
+                      CStorageConfig c_storage_config,
+                      const char* head_index_path) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto status = CStatus();
+    try {
+        AssertInfo(res_index,
+                   "failed to load cardinal head index, passed index was null");
+        AssertInfo(head_index_path != nullptr && strlen(head_index_path) > 0,
+                   "failed to load cardinal head index, path is empty");
+
+        auto storage_config = milvus::storage::StorageConfig();
+        storage_config.address = c_storage_config.address == nullptr
+                                     ? ""
+                                     : std::string(c_storage_config.address);
+        storage_config.bucket_name =
+            c_storage_config.bucket_name == nullptr
+                ? ""
+                : std::string(c_storage_config.bucket_name);
+        storage_config.access_key_id =
+            c_storage_config.access_key_id == nullptr
+                ? ""
+                : std::string(c_storage_config.access_key_id);
+        storage_config.access_key_value =
+            c_storage_config.access_key_value == nullptr
+                ? ""
+                : std::string(c_storage_config.access_key_value);
+        storage_config.root_path =
+            c_storage_config.root_path == nullptr
+                ? ""
+                : std::string(c_storage_config.root_path);
+        storage_config.storage_type =
+            c_storage_config.storage_type == nullptr
+                ? ""
+                : std::string(c_storage_config.storage_type);
+        storage_config.cloud_provider =
+            c_storage_config.cloud_provider == nullptr
+                ? ""
+                : std::string(c_storage_config.cloud_provider);
+        storage_config.iam_endpoint =
+            c_storage_config.iam_endpoint == nullptr
+                ? ""
+                : std::string(c_storage_config.iam_endpoint);
+        storage_config.region = c_storage_config.region == nullptr
+                                    ? ""
+                                    : std::string(c_storage_config.region);
+        storage_config.useSSL = c_storage_config.useSSL;
+        storage_config.sslCACert =
+            c_storage_config.sslCACert == nullptr
+                ? ""
+                : std::string(c_storage_config.sslCACert);
+        storage_config.useIAM = c_storage_config.useIAM;
+        storage_config.useVirtualHost = c_storage_config.useVirtualHost;
+        storage_config.requestTimeoutMs = c_storage_config.requestTimeoutMs;
+        storage_config.gcp_credential_json =
+            c_storage_config.gcp_credential_json == nullptr
+                ? ""
+                : std::string(c_storage_config.gcp_credential_json);
+        storage_config.max_connections = c_storage_config.max_connections;
+        storage_config.tls_min_version =
+            c_storage_config.tls_min_version == nullptr
+                ? ""
+                : std::string(c_storage_config.tls_min_version);
+        storage_config.use_crc32c_checksum =
+            c_storage_config.use_crc32c_checksum;
+
+        auto fs = milvus::storage::StorageV2FSCache::Instance().Get({
+            storage_config.address,
+            storage_config.bucket_name,
+            storage_config.access_key_id,
+            storage_config.access_key_value,
+            storage_config.root_path,
+            storage_config.storage_type,
+            storage_config.cloud_provider,
+            storage_config.iam_endpoint,
+            storage_config.log_level,
+            storage_config.region,
+            storage_config.useSSL,
+            storage_config.sslCACert,
+            storage_config.useIAM,
+            storage_config.useVirtualHost,
+            storage_config.requestTimeoutMs,
+            false,
+            storage_config.gcp_credential_json,
+            false,
+            storage_config.max_connections,
+            storage_config.tls_min_version,
+            storage_config.use_crc32c_checksum,
+        });
+        auto file_manager = std::make_shared<GlobalHeadIndexFileManager>(
+            fs, std::string(head_index_path));
+        auto file_manager_pack =
+            knowhere::Pack(std::shared_ptr<milvus::FileManager>(file_manager));
+        auto index_or =
+            knowhere::IndexFactory::Instance().Create<knowhere::fp32>(
+                knowhere::IndexEnum::INDEX_HNSW, 9, file_manager_pack);
+        AssertInfo(index_or.has_value(),
+                   "failed to create cardinal head index: {}",
+                   index_or.what());
+
+        auto index = std::move(index_or.value());
+        knowhere::BinarySet empty_binary_set;
+        auto deserialize_status = index.Deserialize(
+            empty_binary_set, BuildHeadIndexKnowhereConfig(1, 1));
+        AssertInfo(deserialize_status == knowhere::Status::success,
+                   "failed to deserialize cardinal head index, status: {}",
+                   KnowhereStatusString(deserialize_status));
+
+        *res_index = new CardinalHeadIndexHandle{
+            std::move(index),
+            std::move(file_manager),
+        };
+
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
+SearchCardinalHeadIndex(CCardinalHeadIndex index,
+                        const float* query,
+                        int64_t nq,
+                        int64_t dim,
+                        int64_t topk,
+                        int64_t* ids) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto status = CStatus();
+    try {
+        AssertInfo(index,
+                   "failed to search cardinal head index, index is null");
+        AssertInfo(query,
+                   "failed to search cardinal head index, query is null");
+        AssertInfo(ids, "failed to search cardinal head index, ids is null");
+        AssertInfo(nq > 0, "failed to search cardinal head index, nq <= 0");
+        AssertInfo(dim > 0, "failed to search cardinal head index, dim <= 0");
+        AssertInfo(topk > 0, "failed to search cardinal head index, topk <= 0");
+
+        auto* handle = reinterpret_cast<CardinalHeadIndexHandle*>(index);
+        auto dataset = knowhere::GenDataSet(nq, dim, query);
+        auto result =
+            handle->index.Search(dataset,
+                                 BuildHeadIndexKnowhereConfig(dim, topk),
+                                 knowhere::BitsetView(nullptr));
+        AssertInfo(
+            result.has_value(),
+            "failed to search cardinal head index, status: {}, reason: {}",
+            KnowhereStatusString(result.error()),
+            result.what());
+        const auto* result_ids = result.value()->GetIds();
+        AssertInfo(result_ids != nullptr,
+                   "failed to search cardinal head index, result ids is null");
+        for (int64_t q = 0; q < nq; ++q) {
+            for (int64_t k = 0; k < topk; ++k) {
+                ids[q * topk + k] = result_ids[q * topk + k];
+            }
+        }
+
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
+DeleteCardinalHeadIndex(CCardinalHeadIndex index) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto status = CStatus();
+    try {
+        if (index != nullptr) {
+            delete reinterpret_cast<CardinalHeadIndexHandle*>(index);
+        }
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {

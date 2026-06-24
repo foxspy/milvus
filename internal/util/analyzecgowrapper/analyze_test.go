@@ -32,5 +32,6 @@ func TestAnalyzeV2CallsCAPI(t *testing.T) {
 	})
 
 	require.Nil(t, analyze)
-	require.ErrorContains(t, err, "AnalyzeV2 is not wired to Knowhere yet")
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "AnalyzeV2 is not wired to Knowhere yet")
 }

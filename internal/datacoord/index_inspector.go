@@ -145,7 +145,11 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 }
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
-	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && !i.isExternalCollection(segment.CollectionID) {
+	if enableSortCompaction() &&
+		!segment.GetIsSorted() &&
+		!segment.GetIsSortedByNamespace() &&
+		!hasGlobalStatsIndex(segment) &&
+		!i.isExternalCollection(segment.CollectionID) {
 		log.Ctx(ctx).Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}

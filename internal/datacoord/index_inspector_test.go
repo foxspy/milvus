@@ -295,6 +295,44 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 		assert.True(t, m.indexMeta.IsUnIndexedSegment(2, 1))
 	})
 
+	t.Run("global stats unsorted segment is not skipped", func(t *testing.T) {
+		m.collections.Insert(2, &collectionInfo{
+			ID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "pk", FieldID: 100, DataType: schemapb.DataType_Int64},
+					{Name: "vec", FieldID: 101, DataType: schemapb.DataType_FloatVector},
+				},
+			},
+		})
+
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                   2,
+				CollectionID:         2,
+				PartitionID:          3,
+				NumOfRows:            3000,
+				State:                commonpb.SegmentState_Flushed,
+				IsSorted:             false,
+				GlobalStatsIndexRoot: "global_stats_index/root",
+				HeadIndexFile:        "global_stats_index/root/head_index",
+				ChunkMappingFile:     "global_stats_index/root/chunk_mapping",
+				Binlogs: []*datapb.FieldBinlog{
+					{FieldID: 101},
+				},
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
+
+		alloc.EXPECT().AllocID(mock.Anything).Return(int64(22345), nil).Once()
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		assert.False(t, m.indexMeta.IsUnIndexedSegment(2, 2))
+	})
+
 	t.Run("external unsorted segment is not skipped", func(t *testing.T) {
 		m.collections.Insert(2, &collectionInfo{
 			ID: 2,

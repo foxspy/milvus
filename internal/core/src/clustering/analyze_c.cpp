@@ -106,7 +106,8 @@ Analyze(CAnalyze* res_analyze,
         milvus::storage::FieldDataMeta field_meta{analyze_info->collectionid(),
                                                   analyze_info->partitionid(),
                                                   0,
-                                                  field_id};
+                                                  field_id,
+                                                  analyze_info->field_schema()};
 
         milvus::storage::IndexMeta index_meta{
             0, field_id, analyze_info->buildid(), analyze_info->version()};
@@ -186,9 +187,61 @@ AnalyzeV2(CAnalyze* res_analyze,
         auto res = analyze_info->ParseFromArray(serialized_analyze_info, len);
         AssertInfo(res, "Unmarshal analyze v2 info failed");
 
-        ThrowInfo(Unsupported,
-                  "AnalyzeV2 is not wired to Knowhere yet, buildID={}",
-                  analyze_info->buildid());
+        auto field_type =
+            static_cast<DataType>(analyze_info->field_schema().data_type());
+        auto field_id = analyze_info->field_schema().fieldid();
+
+        milvus::storage::FieldDataMeta field_meta{analyze_info->collectionid(),
+                                                  analyze_info->partitionid(),
+                                                  0,
+                                                  field_id,
+                                                  analyze_info->field_schema()};
+
+        milvus::storage::IndexMeta index_meta{
+            0, field_id, analyze_info->buildid(), analyze_info->version()};
+        auto storage_config =
+            get_storage_config(analyze_info->storage_config());
+        auto chunk_manager =
+            milvus::storage::CreateChunkManager(storage_config);
+        auto fs = milvus::storage::StorageV2FSCache::Instance().Get({
+            storage_config.address,
+            storage_config.bucket_name,
+            storage_config.access_key_id,
+            storage_config.access_key_value,
+            storage_config.root_path,
+            storage_config.storage_type,
+            storage_config.cloud_provider,
+            storage_config.iam_endpoint,
+            storage_config.log_level,
+            storage_config.region,
+            storage_config.useSSL,
+            storage_config.sslCACert,
+            storage_config.useIAM,
+            storage_config.useVirtualHost,
+            storage_config.requestTimeoutMs,
+            false,
+            storage_config.gcp_credential_json,
+            false,
+            storage_config.max_connections,
+            storage_config.tls_min_version,
+            storage_config.use_crc32c_checksum,
+        });
+
+        milvus::storage::FileManagerContext fileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+
+        if (field_type != DataType::VECTOR_FLOAT) {
+            throw SegcoreError(
+                DataTypeInvalid,
+                fmt::format("invalid data type for AnalyzeV2 is {}",
+                            int(field_type)));
+        }
+        auto clusteringJob =
+            std::make_unique<milvus::clustering::KmeansClustering>(
+                fileManagerContext);
+
+        clusteringJob->RunV2<float>(*analyze_info);
+        *res_analyze = new KmeansAnalyzeHandle(std::move(clusteringJob));
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";

@@ -152,6 +152,25 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 	})
 }
 
+func TestPackSegmentLoadInfo_GlobalStatsIndex(t *testing.T) {
+	checkpoint := &msgpb.MsgPosition{
+		ChannelName: "fake-by-dev-rootcoord-dml-1",
+		Timestamp:   tsoutil.ComposeTSByTime(time.Now(), 0),
+	}
+	seg := &datapb.SegmentInfo{
+		ID:                   100,
+		GlobalStatsIndexRoot: "/root/global_stats_index/1/2/ch/3",
+		HeadIndexFile:        "/root/global_stats_index/1/2/ch/3/head_index",
+		ChunkMappingFile:     "/root/global_stats_index/1/2/ch/3/chunk_mapping",
+	}
+
+	loadInfo := PackSegmentLoadInfo(seg, checkpoint, nil)
+
+	assert.Equal(t, seg.GetGlobalStatsIndexRoot(), loadInfo.GetGlobalStatsIndexRoot())
+	assert.Equal(t, seg.GetHeadIndexFile(), loadInfo.GetHeadIndexFile())
+	assert.Equal(t, seg.GetChunkMappingFile(), loadInfo.GetChunkMappingFile())
+}
+
 func TestPackSegmentLoadInfo_CommitTimestamp(t *testing.T) {
 	const commitTs uint64 = 99999
 	const dataVersion int32 = 7

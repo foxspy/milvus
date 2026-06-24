@@ -145,19 +145,20 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		return
 	}
 	req := &workerpb.AnalyzeRequest{
-		ClusterID:         Params.CommonCfg.ClusterPrefix.GetValue(),
-		TaskID:            at.GetTaskID(),
-		CollectionID:      task.CollectionID,
-		PartitionID:       task.PartitionID,
-		FieldID:           task.FieldID,
-		FieldName:         task.FieldName,
-		FieldType:         task.FieldType,
-		InsertChannel:     task.GetInsertChannel(),
-		Dim:               task.Dim,
-		SegmentStats:      make(map[int64]*indexpb.SegmentStats),
-		Version:           task.Version + 1,
-		StorageConfig:     createStorageConfig(),
-		EnableGlobalIndex: task.GetEnableGlobalIndex(),
+		ClusterID:           Params.CommonCfg.ClusterPrefix.GetValue(),
+		TaskID:              at.GetTaskID(),
+		CollectionID:        task.CollectionID,
+		PartitionID:         task.PartitionID,
+		FieldID:             task.FieldID,
+		FieldName:           task.FieldName,
+		FieldType:           task.FieldType,
+		InsertChannel:       task.GetInsertChannel(),
+		Dim:                 task.Dim,
+		SegmentStats:        make(map[int64]*indexpb.SegmentStats),
+		Version:             task.Version + 1,
+		StorageConfig:       createStorageConfig(),
+		EnableGlobalIndex:   task.GetEnableGlobalIndex(),
+		SegmentStorageInfos: make(map[int64]*workerpb.AnalyzeSegmentStorageInfo),
 	}
 
 	// Populate SegmentStats with binlog IDs and row counts from segment metadata.
@@ -184,7 +185,20 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 			NumRows: info.GetNumOfRows(),
 			LogIDs:  binlogIDs,
 		}
+		req.SegmentStorageInfos[segID] = &workerpb.AnalyzeSegmentStorageInfo{
+			StorageVersion: info.GetStorageVersion(),
+			InsertLogs:     info.GetBinlogs(),
+			Manifest:       info.GetManifestPath(),
+		}
+		log.Info("prepare analyze segment storage info",
+			zap.Int64("segmentID", segID),
+			zap.Int64("storageVersion", info.GetStorageVersion()),
+			zap.Int("insertLogFields", len(info.GetBinlogs())),
+			zap.String("manifest", info.GetManifestPath()))
 	}
+	log.Info("prepare analyze request storage infos",
+		zap.Int("segmentStats", len(req.GetSegmentStats())),
+		zap.Int("segmentStorageInfos", len(req.GetSegmentStorageInfos())))
 
 	// Extract dim from schema field TypeParams for vector clustering key.
 	if at.schema != nil {
@@ -205,7 +219,9 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 						zap.Float64("raw data size", totalSegmentsRawDataSize),
 						zap.Int64("num clusters", numClusters),
 						zap.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
-					at.SetState(indexpb.JobState_JobStateFinished, "")
+					if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, ""); err != nil {
+						log.Warn("failed to update skipped analyze task state", zap.Error(err))
+					}
 					return
 				}
 				if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {

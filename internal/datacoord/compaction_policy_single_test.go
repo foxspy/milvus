@@ -190,6 +190,9 @@ func (s *SingleCompactionPolicySuite) TestSortCompaction() {
 	segments[101] = buildTestSegment(101, collID, datapb.SegmentLevel_L1, 0, 10000, 201, false, true)
 	segments[102] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 500, 10000, 10, false, true)
 	segments[103] = buildTestSegment(101, collID, datapb.SegmentLevel_L1, 100, 10000, 1, false, false)
+	segments[102].GlobalStatsIndexRoot = "global_stats_index/root"
+	segments[102].HeadIndexFile = "global_stats_index/root/head_index"
+	segments[102].ChunkMappingFile = "global_stats_index/root/chunk_mapping"
 	segmentsInfo := &SegmentsInfo{
 		segments: segments,
 		secondaryIndexes: segmentInfoIndexes{
@@ -218,7 +221,7 @@ func (s *SingleCompactionPolicySuite) TestSortCompaction() {
 
 	_, sortViews, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
 	s.NoError(err)
-	s.Equal(3, len(sortViews))
+	s.Equal(2, len(sortViews))
 }
 
 func (s *SingleCompactionPolicySuite) TestSegmentSortCompaction() {
@@ -238,6 +241,10 @@ func (s *SingleCompactionPolicySuite) TestSegmentSortCompaction() {
 	segments[102] = buildTestSegment(102, collID, datapb.SegmentLevel_L1, 0, 10000, 201, true, true)
 	segments[103] = buildTestSegment(103, collID, datapb.SegmentLevel_L1, 0, 10000, 201, true, true)
 	segments[103].State = commonpb.SegmentState_Dropped
+	segments[104] = buildTestSegment(104, collID, datapb.SegmentLevel_L1, 0, 10000, 201, false, true)
+	segments[104].GlobalStatsIndexRoot = "global_stats_index/root"
+	segments[104].HeadIndexFile = "global_stats_index/root/head_index"
+	segments[104].ChunkMappingFile = "global_stats_index/root/chunk_mapping"
 	segmentsInfo := &SegmentsInfo{
 		segments: segments,
 		secondaryIndexes: segmentInfoIndexes{
@@ -246,6 +253,7 @@ func (s *SingleCompactionPolicySuite) TestSegmentSortCompaction() {
 					101: segments[101],
 					102: segments[102],
 					103: segments[103],
+					104: segments[104],
 				},
 			},
 		},
@@ -271,6 +279,9 @@ func (s *SingleCompactionPolicySuite) TestSegmentSortCompaction() {
 	s.Nil(sortView)
 
 	sortView = s.singlePolicy.triggerSegmentSortCompaction(context.TODO(), 103)
+	s.Nil(sortView)
+
+	sortView = s.singlePolicy.triggerSegmentSortCompaction(context.TODO(), 104)
 	s.Nil(sortView)
 }
 

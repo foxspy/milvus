@@ -419,6 +419,15 @@ func (t *clusteringCompactionTask) processStats() error {
 	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetTaskProto().GetPlanID()))
 	// just the memory step, if it crashes at this step, the state after recovery is CompactionTaskState_statistic.
 	resultSegments := make([]int64, 0, len(t.GetTaskProto().GetTmpSegments()))
+	if t.GetTaskProto().GetEnableGlobalIndex() || t.GetTaskProto().GetGlobalStatsIndexRoot() != "" {
+		log.Info("global index clustering skips stats sort compaction, set tmp segments to result segments")
+		resultSegments = t.GetTaskProto().GetTmpSegments()
+		log.Info("clustering compaction stats task finished",
+			zap.Int64s("tmp segments", t.GetTaskProto().GetTmpSegments()),
+			zap.Int64s("result segments", resultSegments))
+		return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing), setResultSegments(resultSegments))
+	}
+
 	if Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {
 		existNonStats := false
 		tmpToResultSegments := make(map[int64][]int64, len(t.GetTaskProto().GetTmpSegments()))

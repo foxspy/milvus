@@ -1,7 +1,11 @@
 package delegator
 
 import (
+	"context"
+	"errors"
+
 	"github.com/milvus-io/milvus/internal/util/globalindex"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -50,4 +54,79 @@ func ValidateGlobalIndexChunkPlan(mapping globalindex.ChunkMapping, sealedSegmen
 		}
 	}
 	return nil
+}
+
+func (sd *shardDelegator) planGlobalStatsSearch(
+	ctx context.Context,
+	req *querypb.SearchRequest,
+	sealed []SnapshotItem,
+	sealedRowCount map[int64]int64,
+) ([]SnapshotItem, bool, error) {
+	roots := sd.globalStatsRootsForSealedSegments(sealed)
+	if len(roots) == 0 {
+		return sealed, false, nil
+	}
+
+	statsIndexes := make([]*loadedGlobalStatsIndex, 0, len(roots))
+	sd.globalStatsMut.RLock()
+	for _, root := range roots {
+		statsIndex := sd.globalStatsIndexes[root]
+		if statsIndex != nil {
+			statsIndexes = append(statsIndexes, statsIndex)
+		}
+	}
+	sd.globalStatsMut.RUnlock()
+	if len(statsIndexes) == 0 {
+		return sealed, false, nil
+	}
+
+	topK := req.GetReq().GetTopk() + req.GetReq().GetOffset()
+	if topK <= 0 {
+		topK = 1
+	}
+
+	targetSegments := make(map[int64]struct{})
+	applied := false
+	for _, statsIndex := range statsIndexes {
+		if statsIndex.headIndexSearcher == nil {
+			continue
+		}
+		centroidIDsPerQuery, err := statsIndex.headIndexSearcher.Search(ctx, req.GetReq(), topK)
+		if errors.Is(err, errHeadIndexSearchUnsupported) {
+			continue
+		}
+		if err != nil {
+			return nil, false, merr.Wrap(err, "search global head index")
+		}
+		applied = true
+		for _, centroidIDs := range centroidIDsPerQuery {
+			for _, centroidID := range centroidIDs {
+				for _, chunk := range statsIndex.chunkMapping[centroidID] {
+					if _, ok := sealedRowCount[chunk.SegmentID]; ok {
+						targetSegments[chunk.SegmentID] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	if !applied {
+		return sealed, false, nil
+	}
+
+	planned := make([]SnapshotItem, 0, len(sealed))
+	for _, item := range sealed {
+		segments := make([]SegmentEntry, 0, len(item.Segments))
+		for _, segment := range item.Segments {
+			if _, ok := targetSegments[segment.SegmentID]; ok {
+				segments = append(segments, segment)
+			}
+		}
+		if len(segments) > 0 {
+			planned = append(planned, SnapshotItem{
+				NodeID:   item.NodeID,
+				Segments: segments,
+			})
+		}
+	}
+	return planned, true, nil
 }

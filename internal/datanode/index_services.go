@@ -343,6 +343,8 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 		zap.Float64("trainSizeRatio", req.GetMaxTrainSizeRatio()),
 		zap.Int64("numClusters", req.GetNumClusters()),
 		zap.Int64("taskSlot", req.GetTaskSlot()),
+		zap.Int("segmentStats", len(req.GetSegmentStats())),
+		zap.Int("segmentStorageInfos", len(req.GetSegmentStorageInfos())),
 	)
 
 	if req.GetTaskSlot() <= 0 {

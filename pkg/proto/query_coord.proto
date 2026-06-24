@@ -415,6 +415,9 @@ message SegmentLoadInfo {
     // passing to C++ segcore to overwrite the in-memory timestamp column
     // (enabling correct MVCC visibility and TTL evaluation).
     uint64 commit_timestamp = 28;
+    string global_stats_index_root = 29;
+    string head_index_file = 30;
+    string chunk_mapping_file = 31;
 }
 
 message FieldIndexInfo {

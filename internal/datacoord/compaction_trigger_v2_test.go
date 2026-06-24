@@ -707,6 +707,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitClusteringViewToScheduler() {
 	defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
 	pt.Save(pt.DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1")
 	defer pt.Reset(pt.DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key)
+	pt.Save(pt.DataCoordCfg.ClusteringCompactionGlobalIndexEnable.Key, "true")
+	defer pt.Reset(pt.DataCoordCfg.ClusteringCompactionGlobalIndexEnable.Key)
 
 	s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
 	clusteringKey := &schemapb.FieldSchema{FieldID: 2, Name: "cluster_key", DataType: schemapb.DataType_Int64, IsClusteringKey: true}
@@ -738,6 +740,70 @@ func (s *CompactionTriggerManagerSuite) TestSubmitClusteringViewToScheduler() {
 			s.EqualValues(analyzeTaskID, task.GetAnalyzeTaskID())
 			s.Equal(&datapb.IDRange{Begin: startID, End: segmentIDEnd}, task.GetPreAllocatedSegmentIDs())
 			s.Equal(task.GetStartTime(), task.GetLastStateStartTime())
+			s.False(task.GetEnableGlobalIndex())
+			return nil
+		}).Return(nil).Once()
+
+	view := &ClusteringSegmentsView{
+		label:              s.testLabel,
+		segments:           []*SegmentView{{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 150 * 1024 * 1024}, {ID: 201, label: s.testLabel, NumOfRows: 200, Size: 150 * 1024 * 1024}},
+		clusteringKeyField: clusteringKey,
+		collectionTTL:      100,
+		triggerID:          1001,
+	}
+	s.triggerManager.SubmitClusteringViewToScheduler(context.Background(), view)
+}
+
+func (s *CompactionTriggerManagerSuite) TestSubmitClusteringViewToSchedulerEnablesGlobalIndexForVector() {
+	s.SetupTest()
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "2")
+	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+	pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
+	defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
+	pt.Save(pt.DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1")
+	defer pt.Reset(pt.DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key)
+	pt.Save(pt.DataCoordCfg.ClusteringCompactionGlobalIndexEnable.Key, "true")
+	defer pt.Reset(pt.DataCoordCfg.ClusteringCompactionGlobalIndexEnable.Key)
+
+	s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+	clusteringKey := &schemapb.FieldSchema{
+		FieldID:         2,
+		Name:            "cluster_key",
+		DataType:        schemapb.DataType_FloatVector,
+		IsClusteringKey: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "128"},
+		},
+	}
+	collectionSchema := &schemapb.CollectionSchema{
+		Name: "test_coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			clusteringKey,
+		},
+	}
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+		Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
+	s.triggerManager.handler = handler
+
+	const (
+		startID       = int64(800)
+		segmentIDEnd  = int64(806)
+		planID        = int64(806)
+		analyzeTaskID = int64(807)
+		endID         = int64(808)
+	)
+	s.mockAlloc.EXPECT().AllocN(int64(8)).Return(startID, endID, nil).Once()
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
+		RunAndReturn(func(task *datapb.CompactionTask) error {
+			s.Equal(datapb.CompactionType_ClusteringCompaction, task.GetType())
+			s.EqualValues(planID, task.GetPlanID())
+			s.EqualValues(analyzeTaskID, task.GetAnalyzeTaskID())
+			s.Equal(&datapb.IDRange{Begin: startID, End: segmentIDEnd}, task.GetPreAllocatedSegmentIDs())
+			s.Equal(task.GetStartTime(), task.GetLastStateStartTime())
+			s.True(task.GetEnableGlobalIndex())
 			return nil
 		}).Return(nil).Once()
 

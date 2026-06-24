@@ -172,6 +172,13 @@ message AnalyzeRequest {
   repeated common.KeyValuePair plugin_context = 19;
   bool enable_global_index = 20;
   string insert_channel = 21;
+  map<int64, AnalyzeSegmentStorageInfo> segment_storage_infos = 22;
+}
+
+message AnalyzeSegmentStorageInfo {
+  int64 storage_version = 1;
+  repeated data.FieldBinlog insert_logs = 2;
+  string manifest = 3;
 }
 
 message CreateStatsRequest {
