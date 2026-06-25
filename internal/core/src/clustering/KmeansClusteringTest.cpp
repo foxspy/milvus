@@ -286,23 +286,23 @@ test_run() {
             SegcoreError);
     }
 
-    // data skew
+    // data skew does not skip clustering
     {
-        EXPECT_THROW(
-            try {
-                config["min_cluster_ratio"] = 0.98;
-                config[INSERT_FILES_KEY] = remote_files;
-                config["num_clusters"] = 8;
-                config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
-                config["dim"] = dim;
-                config["num_rows"] = num_rows;
-                clusteringJob->Run<T>(transforConfigToPB(config));
-            } catch (SegcoreError& e) {
-                ASSERT_EQ(e.get_error_code(), ErrorCode::ClusterSkip);
-                CheckResultEmpty<T>(clusteringJob, cm, segment_id, segment_id2);
-                throw e;
-            },
-            SegcoreError);
+        config["min_cluster_ratio"] = 0.98;
+        config[INSERT_FILES_KEY] = remote_files;
+        config["num_clusters"] = 8;
+        config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
+        config["dim"] = dim;
+        config["num_rows"] = num_rows;
+        clusteringJob->Run<T>(transforConfigToPB(config));
+        CheckResultCorrectness<T>(clusteringJob,
+                                  cm,
+                                  segment_id,
+                                  segment_id2,
+                                  dim,
+                                  nb,
+                                  config["num_clusters"],
+                                  true);
     }
 
     // need to sample train data case1

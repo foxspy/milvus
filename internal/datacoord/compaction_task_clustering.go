@@ -632,6 +632,11 @@ func (t *clusteringCompactionTask) processAnalyzing() error {
 		zap.Int64("version", analyzeTask.GetVersion()), zap.String("state", analyzeTask.State.String()))
 	switch analyzeTask.State {
 	case indexpb.JobState_JobStateFinished:
+		if analyzeTask.GetFailReason() != "" {
+			log.Warn("analyze task finished with fail reason", zap.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()),
+				zap.String("failReason", analyzeTask.GetFailReason()))
+			return merr.WrapErrServiceInternalMsg(analyzeTask.GetFailReason())
+		}
 		if analyzeTask.GetCentroidsFile() == "" && !analyzeTask.GetEnableGlobalIndex() {
 			// not retryable, fake finished vector clustering is not supported in opensource
 			return merr.WrapErrClusteringCompactionNotSupportVector()

@@ -172,8 +172,12 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 			stats.BF = bf
 		}
 	} else {
+		centroidsMessage, ok := messageMap["centroids"]
+		if !ok || centroidsMessage == nil {
+			return nil
+		}
 		stats.initCentroids(data, stats.Type)
-		err = json.Unmarshal(*messageMap["centroids"], &stats.Centroids)
+		err = json.Unmarshal(*centroidsMessage, &stats.Centroids)
 		if err != nil {
 			return err
 		}

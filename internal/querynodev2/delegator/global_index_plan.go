@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/globalindex"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func ValidateGlobalIndexChunkPlan(mapping globalindex.ChunkMapping, sealedSegments []SnapshotItem, segmentRows map[int64]int64) error {
@@ -80,7 +81,14 @@ func (sd *shardDelegator) planGlobalStatsSearch(
 		return sealed, false, nil
 	}
 
-	topK := req.GetReq().GetTopk() + req.GetReq().GetOffset()
+	// nprobe (number of nearest centroids to probe in the head index) is decoupled
+	// from the query topk: pruning recall is governed by how many centroids we probe,
+	// not by how many results the caller asked for. When unset (<=0), fall back to the
+	// legacy topk+offset behavior for backward compatibility.
+	topK := paramtable.Get().QueryNodeCfg.GlobalIndexSearchNprobe.GetAsInt64()
+	if topK <= 0 {
+		topK = req.GetReq().GetTopk() + req.GetReq().GetOffset()
+	}
 	if topK <= 0 {
 		topK = 1
 	}

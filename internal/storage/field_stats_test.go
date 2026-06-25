@@ -710,6 +710,13 @@ func TestVectorFieldStatsMarshal(t *testing.T) {
 	assert.ElementsMatch(t, []VectorFieldValue{centroid, centroid2}, stats4.Centroids)
 }
 
+func TestVectorFieldStatsUnmarshalWithoutCentroids(t *testing.T) {
+	stats := &FieldStats{}
+	err := stats.UnmarshalJSON([]byte(`{"fieldID": 1, "type": 101}`))
+	assert.NoError(t, err)
+	assert.Empty(t, stats.Centroids)
+}
+
 func TestFindMaxVersion(t *testing.T) {
 	files := []string{"path/1", "path/2", "path/3"}
 	version, path := FindPartitionStatsMaxVersion(files)

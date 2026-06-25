@@ -172,13 +172,8 @@ class KmeansClustering {
                                       const int64_t num_rows,
                                       const int64_t num_clusters);
 
-    template <typename T>
-    bool
-    IsDataSkew(const milvus::proto::clustering::AnalyzeInfo& config,
-               const int64_t dim,
-               std::vector<int64_t>& num_in_each_centroid);
-
     std::unique_ptr<storage::MemFileManagerImpl> file_manager_;
+    milvus_storage::ArrowFileSystemPtr fs_;
     ClusteringResultMeta cluster_result_;
     bool is_runned_ = false;
     std::string msg_header_;

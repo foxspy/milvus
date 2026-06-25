@@ -417,19 +417,19 @@ func splitCentroids(centroids []int, num int) ([][]int, map[int]int) {
 	return result, resultIndex
 }
 
-type globalIVFCompactionPlan struct {
-	Format        string                     `json:"format"`
-	CentroidCount int                        `json:"centroid_count"`
-	Groups        []globalIVFCompactionGroup `json:"groups"`
+type globalCompactionPlan struct {
+	Format        string                  `json:"format"`
+	CentroidCount int                     `json:"centroid_count"`
+	Groups        []globalCompactionGroup `json:"groups"`
 }
 
-type globalIVFCompactionGroup struct {
+type globalCompactionGroup struct {
 	GroupID   int   `json:"group_id"`
 	Centroids []int `json:"centroids"`
 	Rows      int64 `json:"rows"`
 }
 
-func (t *clusteringCompactionTask) loadGlobalIVFCompactionPlan(ctx context.Context, centroidCount int) ([][]int, error) {
+func (t *clusteringCompactionTask) loadGlobalCompactionPlan(ctx context.Context, centroidCount int) ([][]int, error) {
 	compactionPlanFile := t.plan.GetCompactionPlanFile()
 	if compactionPlanFile == "" {
 		return nil, merr.WrapErrIllegalCompactionPlan("global index compaction plan file is empty")
@@ -442,11 +442,11 @@ func (t *clusteringCompactionTask) loadGlobalIVFCompactionPlan(ctx context.Conte
 		return nil, merr.WrapErrServiceInternalMsg("global index compaction plan %q is empty", compactionPlanFile)
 	}
 
-	var plan globalIVFCompactionPlan
+	var plan globalCompactionPlan
 	if err := json.Unmarshal(planBytes[0], &plan); err != nil {
 		return nil, merr.WrapErrServiceInternalErr(err, "parse global index compaction plan %q", compactionPlanFile)
 	}
-	if plan.CentroidCount != centroidCount {
+	if plan.CentroidCount > 0 && centroidCount > 0 && plan.CentroidCount != centroidCount {
 		return nil, merr.WrapErrServiceInternalMsg(
 			"global index compaction plan centroid count mismatch, plan=%d, centroids=%d",
 			plan.CentroidCount,
@@ -456,19 +456,30 @@ func (t *clusteringCompactionTask) loadGlobalIVFCompactionPlan(ctx context.Conte
 		return nil, merr.WrapErrServiceInternalMsg("global index compaction plan has no groups")
 	}
 
-	seen := make(map[int]struct{}, centroidCount)
+	expectedCentroidCount := centroidCount
+	if plan.CentroidCount > 0 {
+		expectedCentroidCount = plan.CentroidCount
+	}
+
+	seen := make(map[int]struct{}, expectedCentroidCount)
 	centroidGroups := make([][]int, 0, len(plan.Groups))
+	maxCentroidID := -1
 	for _, group := range plan.Groups {
 		if len(group.Centroids) == 0 {
 			continue
 		}
 		centroids := make([]int, 0, len(group.Centroids))
 		for _, centroidID := range group.Centroids {
-			if centroidID < 0 || centroidID >= centroidCount {
+			if centroidID < 0 {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"global index compaction plan centroid id is negative, centroidID=%d",
+					centroidID)
+			}
+			if expectedCentroidCount > 0 && centroidID >= expectedCentroidCount {
 				return nil, merr.WrapErrServiceInternalMsg(
 					"global index compaction plan centroid id out of range, centroidID=%d, centroidCount=%d",
 					centroidID,
-					centroidCount)
+					expectedCentroidCount)
 			}
 			if _, ok := seen[centroidID]; ok {
 				return nil, merr.WrapErrServiceInternalMsg(
@@ -476,14 +487,20 @@ func (t *clusteringCompactionTask) loadGlobalIVFCompactionPlan(ctx context.Conte
 					centroidID)
 			}
 			seen[centroidID] = struct{}{}
+			if centroidID > maxCentroidID {
+				maxCentroidID = centroidID
+			}
 			centroids = append(centroids, centroidID)
 		}
 		centroidGroups = append(centroidGroups, centroids)
 	}
-	if len(seen) != centroidCount {
+	if expectedCentroidCount <= 0 {
+		expectedCentroidCount = maxCentroidID + 1
+	}
+	if len(seen) != expectedCentroidCount {
 		return nil, merr.WrapErrServiceInternalMsg(
 			"global index compaction plan does not cover all centroids, plan=%d, assigned=%d",
-			centroidCount,
+			expectedCentroidCount,
 			len(seen))
 	}
 	if len(centroidGroups) == 0 {
@@ -501,16 +518,19 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, cent
 			return err
 		}
 
-		centroidValues := make([]storage.VectorFieldValue, len(group))
-		for i, offset := range group {
-			if offset < 0 || offset >= len(centroids) {
-				return merr.WrapErrServiceInternalMsg("centroid offset out of range, offset=%d, centroidNum=%d", offset, len(centroids))
+		if centroids != nil {
+			centroidValues := make([]storage.VectorFieldValue, len(group))
+			for i, offset := range group {
+				if offset < 0 || offset >= len(centroids) {
+					return merr.WrapErrServiceInternalMsg("centroid offset out of range, offset=%d, centroidNum=%d", offset, len(centroids))
+				}
+				centroidValues[i] = storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroids[offset])
 			}
-			centroidValues[i] = storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroids[offset])
-			groupIndex[offset] = id
+			fieldStats.SetVectorCentroids(centroidValues...)
 		}
-
-		fieldStats.SetVectorCentroids(centroidValues...)
+		for _, centroidID := range group {
+			groupIndex[centroidID] = id
+		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
@@ -544,7 +564,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, cent
 func (t *clusteringCompactionTask) switchPolicyForVectorPlan(ctx context.Context, centroids *clusteringpb.ClusteringCentroidsStats) error {
 	centroidNum := len(centroids.GetCentroids())
 	if t.plan.GetEnableGlobalIndex() {
-		centroidGroups, err := t.loadGlobalIVFCompactionPlan(ctx, centroidNum)
+		centroidGroups, err := t.loadGlobalCompactionPlan(ctx, centroidNum)
 		if err != nil {
 			return err
 		}
@@ -572,6 +592,26 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 	defer span.End()
 	log := log.Ctx(ctx)
 	analyzeResultPath := t.plan.AnalyzeResultPath
+	if t.plan.GetEnableGlobalIndex() {
+		offsetMappingFiles := make(map[int64]string, len(t.plan.AnalyzeSegmentIds))
+		for _, segmentID := range t.plan.AnalyzeSegmentIds {
+			path := path.Join(analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID, segmentID), common.OffsetDistanceMapping)
+			offsetMappingFiles[segmentID] = path
+			log.Debug("read segment offset distance mapping file", zap.Int64("segmentID", segmentID), zap.String("path", path))
+		}
+		t.segmentIDOffsetMapping = offsetMappingFiles
+
+		centroidGroups, err := t.loadGlobalCompactionPlan(ctx, 0)
+		if err != nil {
+			return err
+		}
+		log.Info("read global index compaction plan",
+			zap.String("path", t.plan.GetCompactionPlanFile()),
+			zap.Int("groupNum", len(centroidGroups)),
+			zap.Any("offsetMappingFiles", t.segmentIDOffsetMapping))
+		return t.generatedVectorPlan(ctx, centroidGroups, nil)
+	}
+
 	centroidFilePath := path.Join(analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), common.Centroids)
 	offsetMappingFiles := make(map[int64]string, 0)
 	for _, segmentID := range t.plan.AnalyzeSegmentIds {

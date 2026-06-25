@@ -36,7 +36,7 @@ func (f fakeGlobalPlanBinlogIO) AsyncUpload(ctx context.Context, kvs map[string]
 	return nil
 }
 
-func TestLoadGlobalIVFCompactionPlan(t *testing.T) {
+func TestLoadGlobalCompactionPlan(t *testing.T) {
 	ctx := context.Background()
 	task := &clusteringCompactionTask{
 		binlogIO: fakeGlobalPlanBinlogIO{files: map[string][]byte{
@@ -47,15 +47,32 @@ func TestLoadGlobalIVFCompactionPlan(t *testing.T) {
 		},
 	}
 
-	groups, err := task.loadGlobalIVFCompactionPlan(ctx, 4)
+	groups, err := task.loadGlobalCompactionPlan(ctx, 4)
 	require.NoError(t, err)
 	require.Equal(t, [][]int{{0, 2}, {1, 3}}, groups)
 }
 
-func TestLoadGlobalIVFCompactionPlanRejectsInvalidPlan(t *testing.T) {
+func TestLoadGlobalCompactionPlanWithoutExternalCentroidCount(t *testing.T) {
+	ctx := context.Background()
+	task := &clusteringCompactionTask{
+		binlogIO: fakeGlobalPlanBinlogIO{files: map[string][]byte{
+			"plan": []byte(`{"format":"cardinal_global_ivf_compaction_plan_v1","centroid_count":4,"groups":[{"group_id":0,"centroids":[0,2],"rows":10},{"group_id":1,"centroids":[1,3],"rows":5}]}`),
+		}},
+		plan: &datapb.CompactionPlan{
+			CompactionPlanFile: "plan",
+		},
+	}
+
+	groups, err := task.loadGlobalCompactionPlan(ctx, 0)
+	require.NoError(t, err)
+	require.Equal(t, [][]int{{0, 2}, {1, 3}}, groups)
+}
+
+func TestLoadGlobalCompactionPlanRejectsInvalidPlan(t *testing.T) {
 	ctx := context.Background()
 	for name, plan := range map[string]string{
 		"count mismatch": `{"centroid_count":3,"groups":[{"group_id":0,"centroids":[0]}]}`,
+		"negative":       `{"centroid_count":2,"groups":[{"group_id":0,"centroids":[-1]}]}`,
 		"out of range":   `{"centroid_count":2,"groups":[{"group_id":0,"centroids":[2]}]}`,
 		"duplicated":     `{"centroid_count":2,"groups":[{"group_id":0,"centroids":[0]},{"group_id":1,"centroids":[0]}]}`,
 		"missing":        `{"centroid_count":2,"groups":[{"group_id":0,"centroids":[0]}]}`,
@@ -71,7 +88,7 @@ func TestLoadGlobalIVFCompactionPlanRejectsInvalidPlan(t *testing.T) {
 				},
 			}
 
-			_, err := task.loadGlobalIVFCompactionPlan(ctx, 2)
+			_, err := task.loadGlobalCompactionPlan(ctx, 2)
 			require.Error(t, err)
 		})
 	}

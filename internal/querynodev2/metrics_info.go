@@ -177,7 +177,15 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 
 // getStreamingQuotaMetrics returns the streaming quota metrics of the QueryNode.
 func getStreamingQuotaMetrics() *metricsinfo.StreamingQuotaMetrics {
-	if streamingMetrics, err := streaming.WAL().Local().GetMetricsIfLocal(context.Background()); err == nil {
+	wal := streaming.WAL()
+	if wal == nil {
+		return nil
+	}
+	local := wal.Local()
+	if local == nil {
+		return nil
+	}
+	if streamingMetrics, err := local.GetMetricsIfLocal(context.Background()); err == nil {
 		walMetrics := make([]metricsinfo.WALMetrics, 0, len(streamingMetrics.WALMetrics))
 		for channel, metric := range streamingMetrics.WALMetrics {
 			if rwMetric, ok := metric.(types.RWWALMetrics); ok {

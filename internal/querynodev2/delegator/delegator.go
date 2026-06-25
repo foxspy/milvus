@@ -601,6 +601,15 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return results, nil
 	}
 
+	// Independent per-query head-index search path (additive, falls back on error).
+	if sd.shouldUseGlobalIndexSearch(req) {
+		if results, err := sd.globalIndexSearch(ctx, req, sealed, growing, sealedRowCount); err != nil {
+			log.Warn("global index search failed, fallback to normal search", zap.Error(err))
+		} else {
+			return results, nil
+		}
+	}
+
 	results, err := sd.search(ctx, req, sealed, growing, sealedRowCount)
 	if err != nil {
 		log.Warn("delegator common search failed", zap.Error(err))

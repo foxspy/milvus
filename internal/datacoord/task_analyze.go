@@ -211,18 +211,27 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 				}
 				req.Dim = int64(dim)
 
-				// Calculate the number of clusters based on total data size.
 				totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(dim) * typeutil.VectorTypeSize(task.FieldType)
-				numClusters := int64(math.Ceil(totalSegmentsRawDataSize / (Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())))
-				if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
-					log.Info("data size is too small, skip analyze task",
-						zap.Float64("raw data size", totalSegmentsRawDataSize),
-						zap.Int64("num clusters", numClusters),
-						zap.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
-					if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, ""); err != nil {
-						log.Warn("failed to update skipped analyze task state", zap.Error(err))
+				var numClusters int64
+				if task.GetEnableGlobalIndex() {
+					numRowsPerCentroid := Params.DataCoordCfg.ClusteringCompactionGlobalNumRowsPerCentroid.GetAsInt64()
+					if numRowsPerCentroid <= 0 {
+						numRowsPerCentroid = 1
 					}
-					return
+					numClusters = int64(math.Ceil(float64(totalSegmentsRows) / float64(numRowsPerCentroid)))
+				} else {
+					// Calculate the number of clusters based on total data size.
+					numClusters = int64(math.Ceil(totalSegmentsRawDataSize / (Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())))
+					if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
+						log.Info("data size is too small, skip analyze task",
+							zap.Float64("raw data size", totalSegmentsRawDataSize),
+							zap.Int64("num clusters", numClusters),
+							zap.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
+						if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, ""); err != nil {
+							log.Warn("failed to update skipped analyze task state", zap.Error(err))
+						}
+						return
+					}
 				}
 				if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {
 					numClusters = Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64()

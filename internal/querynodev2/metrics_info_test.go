@@ -138,6 +138,11 @@ func TestGetSegmentJSON(t *testing.T) {
 func TestStreamingQuotaMetrics(t *testing.T) {
 	paramtable.Init()
 
+	streaming.SetWALForTest(nil)
+	m := getStreamingQuotaMetrics()
+	assert.Nil(t, m)
+	streaming.RecoverWALForTest()
+
 	wal := mock_streaming.NewMockWALAccesser(t)
 	local := mock_streaming.NewMockLocal(t)
 	now := time.Now()
@@ -157,7 +162,7 @@ func TestStreamingQuotaMetrics(t *testing.T) {
 	streaming.SetWALForTest(wal)
 	defer streaming.RecoverWALForTest()
 
-	m := getStreamingQuotaMetrics()
+	m = getStreamingQuotaMetrics()
 	assert.Len(t, m.WALs, 1)
 	assert.Equal(t, "ch1", m.WALs[0].Channel.Name)
 	assert.Equal(t, tsoutil.ComposeTSByTime(now.Add(-time.Second), 0), m.WALs[0].RecoveryTimeTick)

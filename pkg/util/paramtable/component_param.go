@@ -3686,6 +3686,8 @@ type queryNodeConfig struct {
 
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 	EnableSegmentPrune                      ParamItem `refreshable:"true"`
+	GlobalIndexSearchNprobe                 ParamItem `refreshable:"true"`
+	GlobalIndexSearchEnabled                ParamItem `refreshable:"true"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"true"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
@@ -4976,6 +4978,27 @@ user-task-polling:
 		Export:       true,
 	}
 	p.EnableSegmentPrune.Init(base.mgr)
+	p.GlobalIndexSearchNprobe = ParamItem{
+		Key:          "queryNode.globalIndex.searchNprobe",
+		Version:      "2.7.0",
+		DefaultValue: "0",
+		Doc: "Number of nearest centroids to probe in the global head index when pruning sealed segments. " +
+			"When <=0, falls back to legacy behavior (topk+offset). Set a positive value to decouple " +
+			"centroid probing from query topk.",
+		Export: true,
+	}
+	p.GlobalIndexSearchNprobe.Init(base.mgr)
+	p.GlobalIndexSearchEnabled = ParamItem{
+		Key:          "queryNode.globalIndex.search.enabled",
+		Version:      "2.7.0",
+		DefaultValue: "false",
+		Doc: "Enable the independent head-index per-query search path on the shard delegator. " +
+			"When true, each query independently uses the global head index to select its own " +
+			"target segments (no per-request segment union). Falls back to the normal search path " +
+			"when disabled or inapplicable.",
+		Export: true,
+	}
+	p.GlobalIndexSearchEnabled.Init(base.mgr)
 	p.DefaultSegmentFilterRatio = ParamItem{
 		Key:          "queryNode.defaultSegmentFilterRatio",
 		Version:      "2.4.0",
@@ -5185,30 +5208,31 @@ type dataCoordConfig struct {
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
 	// Clustering Compaction
-	ClusteringCompactionEnable                  ParamItem `refreshable:"true"`
-	ClusteringCompactionAutoEnable              ParamItem `refreshable:"true"`
-	ClusteringCompactionTriggerInterval         ParamItem `refreshable:"true"`
-	ClusteringCompactionMinInterval             ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxInterval             ParamItem `refreshable:"true"`
-	ClusteringCompactionNewDataSizeThreshold    ParamItem `refreshable:"true"`
-	ClusteringCompactionPreferSegmentSizeRatio  ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxSegmentSizeRatio     ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxTrainSizeRatio       ParamItem `refreshable:"true"`
-	ClusteringCompactionTimeoutInSeconds        ParamItem `refreshable:"true"` // deprecated
-	ClusteringCompactionMaxCentroidsNum         ParamItem `refreshable:"true"`
-	ClusteringCompactionMinCentroidsNum         ParamItem `refreshable:"true"`
-	ClusteringCompactionMinClusterSizeRatio     ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxClusterSizeRatio     ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxClusterSize          ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalIndexEnable       ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalTrainMethod       ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalAssignMethod      ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalCompactionMaxRows ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalCompactionMinRows ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalKmeansMaxIter     ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalKmeansRandomState ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalKmeansFastMode    ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalKmeansFastEpsilon ParamItem `refreshable:"true"`
+	ClusteringCompactionEnable                   ParamItem `refreshable:"true"`
+	ClusteringCompactionAutoEnable               ParamItem `refreshable:"true"`
+	ClusteringCompactionTriggerInterval          ParamItem `refreshable:"true"`
+	ClusteringCompactionMinInterval              ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxInterval              ParamItem `refreshable:"true"`
+	ClusteringCompactionNewDataSizeThreshold     ParamItem `refreshable:"true"`
+	ClusteringCompactionPreferSegmentSizeRatio   ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxSegmentSizeRatio      ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxTrainSizeRatio        ParamItem `refreshable:"true"`
+	ClusteringCompactionTimeoutInSeconds         ParamItem `refreshable:"true"` // deprecated
+	ClusteringCompactionMaxCentroidsNum          ParamItem `refreshable:"true"`
+	ClusteringCompactionMinCentroidsNum          ParamItem `refreshable:"true"`
+	ClusteringCompactionMinClusterSizeRatio      ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSizeRatio      ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSize           ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalIndexEnable        ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalTrainMethod        ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalAssignMethod       ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalCompactionMaxRows  ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalCompactionMinRows  ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalNumRowsPerCentroid ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalKmeansMaxIter      ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalKmeansRandomState  ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalKmeansFastMode     ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalKmeansFastEpsilon  ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
@@ -6103,6 +6127,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.ClusteringCompactionGlobalCompactionMinRows.Init(base.mgr)
+
+	p.ClusteringCompactionGlobalNumRowsPerCentroid = ParamItem{
+		Key:          "dataCoord.compaction.clustering.globalIndex.numRowsPerCentroid",
+		Version:      "2.7.0",
+		DefaultValue: "100",
+		Doc:          "Target rows per centroid for global index AnalyzeV2",
+		Export:       true,
+	}
+	p.ClusteringCompactionGlobalNumRowsPerCentroid.Init(base.mgr)
 
 	p.ClusteringCompactionGlobalKmeansMaxIter = ParamItem{
 		Key:          "dataCoord.compaction.clustering.globalIndex.kmeansMaxIter",

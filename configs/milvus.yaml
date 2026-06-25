@@ -759,6 +759,7 @@ dataCoord:
         assignMethod: index # Cardinal global index assign method for AnalyzeV2: index/kmeans
         compactionMaxRows: 0 # Target max rows per AnalyzeV2 compaction group. Zero uses max segment rows
         compactionMinRows: 0 # Target min rows for AnalyzeV2 compaction group packing
+        numRowsPerCentroid: 100 # Target rows per centroid for global index AnalyzeV2
         kmeansMaxIter: 10 # Max kmeans iterations for AnalyzeV2 Cardinal clustering
         kmeansRandomState: 0 # Random state for AnalyzeV2 Cardinal clustering
         kmeansFastMode: 0 # Cardinal kmeansfast mode for AnalyzeV2

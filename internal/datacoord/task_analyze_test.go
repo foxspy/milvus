@@ -280,6 +280,58 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DataTooSmall() {
 	s.Equal(indexpb.JobState_JobStateFinished, at.GetState())
 }
 
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_GlobalIndexDoesNotSkipSmallData() {
+	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("999999999")
+	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
+	origRowsPerCentroid := Params.DataCoordCfg.ClusteringCompactionGlobalNumRowsPerCentroid.SwapTempValue("100")
+	defer Params.DataCoordCfg.ClusteringCompactionGlobalNumRowsPerCentroid.SwapTempValue(origRowsPerCentroid)
+
+	task := s.mt.analyzeMeta.tasks[s.taskID]
+	task.EnableGlobalIndex = true
+	defer func() {
+		task.EnableGlobalIndex = false
+	}()
+
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
+		return req.GetEnableGlobalIndex() && req.GetNumClusters() == 30
+	})).Return(nil)
+
+	at.CreateTaskOnWorker(1, cluster)
+	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
+}
+
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_GlobalIndexNumClustersCapped() {
+	origMax := Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.SwapTempValue("10")
+	defer Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.SwapTempValue(origMax)
+	origRowsPerCentroid := Params.DataCoordCfg.ClusteringCompactionGlobalNumRowsPerCentroid.SwapTempValue("1")
+	defer Params.DataCoordCfg.ClusteringCompactionGlobalNumRowsPerCentroid.SwapTempValue(origRowsPerCentroid)
+
+	task := s.mt.analyzeMeta.tasks[s.taskID]
+	task.EnableGlobalIndex = true
+	defer func() {
+		task.EnableGlobalIndex = false
+	}()
+
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
+		return req.GetEnableGlobalIndex() && req.GetNumClusters() == 10
+	})).Return(nil)
+
+	at.CreateTaskOnWorker(1, cluster)
+	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
+}
+
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
 	// Set MaxCentroidsNum=1, MinCentroidsNum=1, SegmentMaxSize very small to force numClusters > max
 	origMax := Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.SwapTempValue("1")

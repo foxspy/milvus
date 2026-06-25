@@ -21,9 +21,11 @@
 #include <atomic>
 #include <cstdint>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <iosfwd>
-#include <numeric>
 #include <random>
+#include <type_traits>
 #include <utility>
 
 #include "clustering/KmeansClustering.h"
@@ -42,16 +44,222 @@
 #include "knowhere/config.h"
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
+#include "knowhere/index/index_factory.h"
 #include "log/Log.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
+#include "storage/RemoteInputStream.h"
+#include "storage/RemoteOutputStream.h"
 
 namespace milvus::clustering {
+
+namespace {
+
+class GlobalHeadIndexFileManager : public milvus::FileManager {
+ public:
+    GlobalHeadIndexFileManager(milvus_storage::ArrowFileSystemPtr fs,
+                               std::string head_index_path)
+        : fs_(std::move(fs)), head_index_path_(std::move(head_index_path)) {
+    }
+
+    bool
+    LoadFile(const std::string&) override {
+        return true;
+    }
+
+    bool
+    AddFile(const std::string&) override {
+        return false;
+    }
+
+    bool
+    AddFileMeta(const milvus::FileMeta& file_meta) override {
+        file_size_ = file_meta.file_size;
+        return true;
+    }
+
+    std::optional<bool>
+    IsExisted(const std::string&) override {
+        return true;
+    }
+
+    bool
+    RemoveFile(const std::string&) override {
+        return false;
+    }
+
+    std::shared_ptr<milvus::InputStream>
+    OpenInputStream(const std::string&) override {
+        auto remote_file = fs_->OpenInputFile(head_index_path_);
+        AssertInfo(remote_file.ok(),
+                   "failed to open global head index {}, reason: {}",
+                   head_index_path_,
+                   remote_file.status().ToString());
+        return std::static_pointer_cast<milvus::InputStream>(
+            std::make_shared<milvus::storage::RemoteInputStream>(
+                std::move(remote_file.ValueOrDie())));
+    }
+
+    std::shared_ptr<milvus::OutputStream>
+    OpenOutputStream(const std::string&) override {
+        AssertInfo(fs_, "fs is nullptr, cannot open global head index output");
+        if (milvus_storage::IsLocalFileSystem(fs_)) {
+            auto dir_pos = head_index_path_.find_last_of('/');
+            if (dir_pos != std::string::npos && dir_pos > 0) {
+                auto dir_path = head_index_path_.substr(0, dir_pos);
+                auto status = fs_->CreateDir(dir_path, /*recursive=*/true);
+                AssertInfo(
+                    status.ok(),
+                    "failed to create global head index dir {}, reason: {}",
+                    dir_path,
+                    status.ToString());
+            }
+        }
+        auto remote_stream = fs_->OpenOutputStream(head_index_path_);
+        AssertInfo(remote_stream.ok(),
+                   "failed to open global head index output {}, reason: {}",
+                   head_index_path_,
+                   remote_stream.status().ToString());
+        return std::make_shared<milvus::storage::RemoteOutputStream>(
+            std::move(remote_stream.ValueOrDie()));
+    }
+
+    int64_t
+    FileSize() const {
+        return file_size_;
+    }
+
+ private:
+    milvus_storage::ArrowFileSystemPtr fs_;
+    std::string head_index_path_;
+    int64_t file_size_ = 0;
+};
+
+class TempFileGuard {
+ public:
+    explicit TempFileGuard(std::string path) : path_(std::move(path)) {
+    }
+
+    ~TempFileGuard() {
+        std::error_code ec;
+        std::filesystem::remove(path_, ec);
+    }
+
+    const std::string&
+    Path() const {
+        return path_;
+    }
+
+ private:
+    std::string path_;
+};
+
+knowhere::Json
+BuildHeadIndexKnowhereConfig(int64_t dim,
+                             int64_t num_clusters,
+                             const std::string& data_path) {
+    const auto graph_width =
+        std::max<int64_t>(2, std::min<int64_t>(48, num_clusters - 1));
+    const auto build_candidates = std::max<int64_t>(100, graph_width * 4);
+
+    knowhere::Json config;
+    config[knowhere::meta::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    config[knowhere::meta::METRIC_TYPE] = knowhere::metric::L2;
+    config[knowhere::meta::DIM] = dim;
+    config[knowhere::meta::INDEX_PREFIX] = "global_head_index";
+    config[knowhere::meta::INDEX_ENGINE_VERSION] = 9;
+    config[knowhere::meta::DATA_PATH] = data_path;
+    config["M"] = graph_width;
+    config["efConstruction"] = build_candidates;
+    config["graph_build_algo"] = "Vamana";
+    config["max_degree"] = graph_width;
+    config["search_list_size"] = build_candidates;
+    config["index_algo"] = "GRAPH";
+    config["build_quant_type"] = "NONE";
+    config["search_quant_type"] = "NONE";
+    config["refine_quant_type"] = "NONE";
+    config["skip_refine"] = false;
+    return config;
+}
+
+template <typename T>
+TempFileGuard
+WriteHeadIndexTrainData(const T* centroids, int64_t num_clusters, int64_t dim) {
+    static_assert(std::is_same_v<T, float>,
+                  "global head index currently supports float centroids only");
+    auto temp_path = (std::filesystem::temp_directory_path() /
+                      fmt::format("global_head_index_{}_{}.bin",
+                                  std::time(nullptr),
+                                  reinterpret_cast<uintptr_t>(centroids)))
+                         .string();
+    std::ofstream writer(temp_path, std::ios::binary | std::ios::trunc);
+    AssertInfo(writer.good(),
+               "failed to create global head index train data: {}",
+               temp_path);
+    auto rows = static_cast<int32_t>(num_clusters);
+    auto cols = static_cast<int32_t>(dim);
+    writer.write(reinterpret_cast<const char*>(&rows), sizeof(rows));
+    writer.write(reinterpret_cast<const char*>(&cols), sizeof(cols));
+    writer.write(reinterpret_cast<const char*>(centroids),
+                 num_clusters * dim * sizeof(T));
+    writer.close();
+    AssertInfo(writer.good(),
+               "failed to write global head index train data: {}",
+               temp_path);
+    return TempFileGuard(temp_path);
+}
+
+template <typename T>
+void
+BuildAndUploadHeadIndex(const T* centroids,
+                        int64_t num_clusters,
+                        int64_t dim,
+                        const std::string& head_index_path,
+                        milvus_storage::ArrowFileSystemPtr fs) {
+    AssertInfo(centroids != nullptr,
+               "failed to build global head index, centroids is null");
+    AssertInfo(!head_index_path.empty(),
+               "failed to build global head index, path is empty");
+    AssertInfo(fs != nullptr, "failed to build global head index, fs is null");
+
+    auto train_data = WriteHeadIndexTrainData(centroids, num_clusters, dim);
+    auto file_manager = std::make_shared<GlobalHeadIndexFileManager>(
+        std::move(fs), head_index_path);
+    auto file_manager_pack =
+        knowhere::Pack(std::shared_ptr<milvus::FileManager>(file_manager));
+    auto index_or = knowhere::IndexFactory::Instance().Create<knowhere::fp32>(
+        knowhere::IndexEnum::INDEX_HNSW, 9, file_manager_pack);
+    AssertInfo(index_or.has_value(),
+               "failed to create global head index: {}",
+               index_or.what());
+
+    auto head_index = std::move(index_or.value());
+    auto dataset = knowhere::GenDataSet(num_clusters, dim, centroids);
+    auto index_config =
+        BuildHeadIndexKnowhereConfig(dim, num_clusters, train_data.Path());
+    auto build_status = head_index.Build(dataset, index_config);
+    AssertInfo(build_status == knowhere::Status::success,
+               "failed to build global head index, status: {}",
+               KnowhereStatusString(build_status));
+
+    knowhere::BinarySet binary_set;
+    auto serialize_status = head_index.Serialize(binary_set);
+    AssertInfo(serialize_status == knowhere::Status::success,
+               "failed to serialize global head index, status: {}",
+               KnowhereStatusString(serialize_status));
+    LOG_INFO("global head index uploaded, path: {}, size: {}",
+             head_index_path,
+             file_manager->FileSize());
+}
+
+}  // namespace
 
 KmeansClustering::KmeansClustering(
     const storage::FileManagerContext& file_manager_context) {
     file_manager_ =
         std::make_unique<storage::MemFileManagerImpl>(file_manager_context);
+    fs_ = file_manager_context.fs;
     AssertInfo(file_manager_ != nullptr, "create file manager failed!");
     int64_t collection_id = file_manager_context.fieldDataMeta.collection_id;
     int64_t partition_id = file_manager_context.fieldDataMeta.partition_id;
@@ -333,40 +541,6 @@ KmeansClustering::CentroidIdMappingWithDistanceToPB(
 }
 
 template <typename T>
-bool
-KmeansClustering::IsDataSkew(
-    const milvus::proto::clustering::AnalyzeInfo& config,
-    const int64_t dim,
-    std::vector<int64_t>& num_in_each_centroid) {
-    auto min_cluster_ratio = config.min_cluster_ratio();
-    auto max_cluster_ratio = config.max_cluster_ratio();
-    auto max_cluster_size = config.max_cluster_size();
-    std::sort(num_in_each_centroid.begin(), num_in_each_centroid.end());
-    size_t avg_size =
-        std::accumulate(
-            num_in_each_centroid.begin(), num_in_each_centroid.end(), 0) /
-        (num_in_each_centroid.size());
-    if (num_in_each_centroid.front() <= min_cluster_ratio * avg_size) {
-        LOG_INFO(msg_header_ + "minimum cluster too small: {}, avg: {}",
-                 num_in_each_centroid.front(),
-                 avg_size);
-        return true;
-    }
-    if (num_in_each_centroid.back() >= max_cluster_ratio * avg_size) {
-        LOG_INFO(msg_header_ + "maximum cluster too large: {}, avg: {}",
-                 num_in_each_centroid.back(),
-                 avg_size);
-        return true;
-    }
-    if (num_in_each_centroid.back() * dim * sizeof(T) >= max_cluster_size) {
-        LOG_INFO(msg_header_ + "maximum cluster size too large: {}B",
-                 num_in_each_centroid.back() * dim * sizeof(T));
-        return true;
-    }
-    return false;
-}
-
-template <typename T>
 void
 KmeansClustering::StreamingAssignandUpload(
     knowhere::Cluster<knowhere::ClusterNode>& cluster_node,
@@ -400,7 +574,6 @@ KmeansClustering::StreamingAssignandUpload(
     LOG_INFO(msg_header_ + "upload cluster centroids file done");
 
     LOG_INFO(msg_header_ + "start upload cluster id mapping file");
-    std::vector<int64_t> num_vectors_each_centroid(num_clusters, 0);
 
     auto serializeIdMappingAndUpload = [&](const int64_t segment_id,
                                            const milvus::proto::clustering::
@@ -429,10 +602,6 @@ KmeansClustering::StreamingAssignandUpload(
         // id mapping has been computed, just upload to remote
         if (i < trained_segments_num) {
             serializeIdMappingAndUpload(segment_id, id_mapping_stats[i]);
-            for (int64_t j = 0; j < num_clusters; ++j) {
-                num_vectors_each_centroid[j] +=
-                    id_mapping_stats[i].num_in_centroid(j);
-            }
         } else {  // streaming download raw data, assign id mapping, then upload
             int64_t num_row = num_rows.at(segment_id);
             std::unique_ptr<T[]> buf = std::make_unique<T[]>(num_row * dim);
@@ -462,18 +631,8 @@ KmeansClustering::StreamingAssignandUpload(
 
             auto id_mapping_pb = CentroidIdMappingToPB(
                 id_mapping, {segment_id}, 1, num_rows, num_clusters)[0];
-            for (int64_t j = 0; j < num_clusters; ++j) {
-                num_vectors_each_centroid[j] +=
-                    id_mapping_pb.num_in_centroid(j);
-            }
             serializeIdMappingAndUpload(segment_id, id_mapping_pb);
         }
-    }
-    if (IsDataSkew<T>(config, dim, num_vectors_each_centroid)) {
-        LOG_INFO(msg_header_ + "data skew! skip clustering");
-        // skip clustering, nothing takes affect
-        throw SegcoreError(ErrorCode::ClusterSkip,
-                           "data skew! skip clustering");
     }
     LOG_INFO(msg_header_ + "upload cluster id mapping file done");
     cluster_result_.id_mappings = std::move(remote_paths_to_size);
@@ -813,27 +972,12 @@ KmeansClustering::RunV2(const milvus::proto::clustering::AnalyzeInfo& config) {
         remote_paths_to_size.at(centroid_remote_path);
     remote_paths_to_size.clear();
 
-    auto head_index_res = cluster_node.BuildHeadIndex(cluster_conf);
-    if (!head_index_res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  fmt::format("failed to build AnalyzeV2 head index: {}: {}",
-                              KnowhereStatusString(head_index_res.error()),
-                              head_index_res.what()));
-    }
-    const auto* head_index_data =
-        reinterpret_cast<const uint8_t*>(head_index_res.value()->GetTensor());
-    const auto head_index_size = head_index_res.value()->GetRows();
-    AddClusteringResultFiles(file_manager_->GetChunkManager().get(),
-                             head_index_data,
-                             head_index_size,
-                             config.head_index_path(),
-                             remote_paths_to_size);
-    remote_paths_to_size.clear();
+    BuildAndUploadHeadIndex<T>(
+        centroids, num_clusters, dim, config.head_index_path(), fs_);
     rc.RecordSection("head index upload done");
 
     auto all_ids = std::make_unique<long long int[]>(data_num);
     size_t all_offset = 0;
-    std::vector<int64_t> num_vectors_each_centroid(num_clusters, 0);
     std::unordered_map<std::string, int64_t> id_mapping_paths_to_size;
 
     auto upload_mapping =
@@ -887,8 +1031,7 @@ KmeansClustering::RunV2(const milvus::proto::clustering::AnalyzeInfo& config) {
                           offset);
         auto segment_dataset = GenDataset(num_row, dim, segment_buf.release());
         segment_dataset->SetIsOwner(true);
-        auto assign_res =
-            cluster_node.AssignWithDistance(*segment_dataset, cluster_conf);
+        auto assign_res = cluster_node.Assign(*segment_dataset, cluster_conf);
         if (!assign_res.has_value()) {
             ThrowInfo(ErrorCode::UnexpectedError,
                       fmt::format("failed to AnalyzeV2 assign: {}: {}",
@@ -900,19 +1043,10 @@ KmeansClustering::RunV2(const milvus::proto::clustering::AnalyzeInfo& config) {
         const auto* distances = assign_res.value()->GetDistance();
         auto id_mapping_pb = CentroidIdMappingWithDistanceToPB(
             id_mapping, distances, num_row, num_clusters);
-        for (int64_t j = 0; j < num_clusters; ++j) {
-            num_vectors_each_centroid[j] += id_mapping_pb.num_in_centroid(j);
-        }
         for (int64_t row = 0; row < num_row; ++row) {
             all_ids[all_offset++] = id_mapping[row];
         }
         upload_mapping(segment_id, id_mapping_pb);
-    }
-
-    if (IsDataSkew<T>(config, dim, num_vectors_each_centroid)) {
-        LOG_INFO(msg_header_ + "AnalyzeV2 data skew! skip clustering");
-        throw SegcoreError(ErrorCode::ClusterSkip,
-                           "data skew! skip clustering");
     }
 
     auto assignment_dataset = std::make_shared<knowhere::DataSet>();
@@ -921,7 +1055,7 @@ KmeansClustering::RunV2(const milvus::proto::clustering::AnalyzeInfo& config) {
     assignment_dataset->SetIds(std::move(all_ids));
     assignment_dataset->SetIsOwner(true);
     auto compaction_plan_res =
-        cluster_node.BuildIvfCompactionPlan(*assignment_dataset, cluster_conf);
+        cluster_node.BuildCompactionPlan(*assignment_dataset, cluster_conf);
     if (!compaction_plan_res.has_value()) {
         ThrowInfo(
             ErrorCode::UnexpectedError,
@@ -1005,10 +1139,5 @@ template milvus::proto::clustering::ClusteringCentroidsStats
 KmeansClustering::CentroidsToPB<float>(const float* centroids,
                                        const int64_t num_clusters,
                                        const int64_t dim);
-template bool
-KmeansClustering::IsDataSkew<float>(
-    const milvus::proto::clustering::AnalyzeInfo& config,
-    const int64_t dim,
-    std::vector<int64_t>& num_in_each_centroid);
 
 }  // namespace milvus::clustering
