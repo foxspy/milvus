@@ -40,7 +40,7 @@ func TestLoadGlobalCompactionPlan(t *testing.T) {
 	ctx := context.Background()
 	task := &clusteringCompactionTask{
 		binlogIO: fakeGlobalPlanBinlogIO{files: map[string][]byte{
-			"plan": []byte(`{"format":"cardinal_global_ivf_compaction_plan_v1","centroid_count":4,"groups":[{"group_id":0,"centroids":[0,2],"rows":10},{"group_id":1,"centroids":[1,3],"rows":5}]}`),
+			"plan": []byte(`{"format":"global_ivf_compaction_plan_v1","centroid_count":4,"groups":[{"group_id":0,"centroids":[0,2],"rows":10},{"group_id":1,"centroids":[1,3],"rows":5}]}`),
 		}},
 		plan: &datapb.CompactionPlan{
 			CompactionPlanFile: "plan",
@@ -56,7 +56,7 @@ func TestLoadGlobalCompactionPlanWithoutExternalCentroidCount(t *testing.T) {
 	ctx := context.Background()
 	task := &clusteringCompactionTask{
 		binlogIO: fakeGlobalPlanBinlogIO{files: map[string][]byte{
-			"plan": []byte(`{"format":"cardinal_global_ivf_compaction_plan_v1","centroid_count":4,"groups":[{"group_id":0,"centroids":[0,2],"rows":10},{"group_id":1,"centroids":[1,3],"rows":5}]}`),
+			"plan": []byte(`{"format":"global_ivf_compaction_plan_v1","centroid_count":4,"groups":[{"group_id":0,"centroids":[0,2],"rows":10},{"group_id":1,"centroids":[1,3],"rows":5}]}`),
 		}},
 		plan: &datapb.CompactionPlan{
 			CompactionPlanFile: "plan",
@@ -68,6 +68,24 @@ func TestLoadGlobalCompactionPlanWithoutExternalCentroidCount(t *testing.T) {
 	require.Equal(t, [][]int{{0, 2}, {1, 3}}, groups)
 }
 
+// kmeans may produce empty clusters; knowhere omits those centroids from the plan,
+// so a plan covering only the non-empty centroids is valid.
+func TestLoadGlobalCompactionPlanAllowsOmittedEmptyCentroids(t *testing.T) {
+	ctx := context.Background()
+	task := &clusteringCompactionTask{
+		binlogIO: fakeGlobalPlanBinlogIO{files: map[string][]byte{
+			"plan": []byte(`{"format":"global_ivf_compaction_plan_v1","centroid_count":2,"groups":[{"group_id":0,"centroids":[0],"rows":10}]}`),
+		}},
+		plan: &datapb.CompactionPlan{
+			CompactionPlanFile: "plan",
+		},
+	}
+
+	groups, err := task.loadGlobalCompactionPlan(ctx, 2)
+	require.NoError(t, err)
+	require.Equal(t, [][]int{{0}}, groups)
+}
+
 func TestLoadGlobalCompactionPlanRejectsInvalidPlan(t *testing.T) {
 	ctx := context.Background()
 	for name, plan := range map[string]string{
@@ -75,7 +93,6 @@ func TestLoadGlobalCompactionPlanRejectsInvalidPlan(t *testing.T) {
 		"negative":       `{"centroid_count":2,"groups":[{"group_id":0,"centroids":[-1]}]}`,
 		"out of range":   `{"centroid_count":2,"groups":[{"group_id":0,"centroids":[2]}]}`,
 		"duplicated":     `{"centroid_count":2,"groups":[{"group_id":0,"centroids":[0]},{"group_id":1,"centroids":[0]}]}`,
-		"missing":        `{"centroid_count":2,"groups":[{"group_id":0,"centroids":[0]}]}`,
 		"empty groups":   `{"centroid_count":2,"groups":[]}`,
 	} {
 		t.Run(name, func(t *testing.T) {

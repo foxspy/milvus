@@ -15,4 +15,4 @@
 
 typedef void* CIndex;
 typedef void* CIndexQueryResult;
-typedef void* CCardinalHeadIndex;
+typedef void* CHeadIndex;

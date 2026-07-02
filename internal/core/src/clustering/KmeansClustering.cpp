@@ -889,7 +889,7 @@ KmeansClustering::RunV2(const milvus::proto::clustering::AnalyzeInfo& config) {
     }
 
     auto cluster_node_obj =
-        knowhere::ClusterFactory::Instance().Create<T>(CARDINAL_KMEANS_CLUSTER);
+        knowhere::ClusterFactory::Instance().Create<T>(GLOBAL_KMEANS_CLUSTER);
     knowhere::Cluster<knowhere::ClusterNode> cluster_node;
     if (cluster_node_obj.has_value()) {
         cluster_node = std::move(cluster_node_obj.value());
@@ -933,7 +933,7 @@ KmeansClustering::RunV2(const milvus::proto::clustering::AnalyzeInfo& config) {
     std::map<int64_t, milvus::proto::clustering::SegmentStorageInfo>
         segment_storage_infos(config.segment_storage_infos().begin(),
                               config.segment_storage_infos().end());
-    knowhere::TimeRecorder rc(msg_header_ + "AnalyzeV2 cardinal kmeans",
+    knowhere::TimeRecorder rc(msg_header_ + "AnalyzeV2 kmeans",
                               2 /* log level: info */);
     LOG_INFO(
         msg_header_ + "AnalyzeV2 pull and sample {}GB data out of {}GB data",
@@ -955,7 +955,7 @@ KmeansClustering::RunV2(const milvus::proto::clustering::AnalyzeInfo& config) {
 
     knowhere::Json cluster_conf;
     cluster_conf[NUM_CLUSTERS] = num_clusters;
-    // Forward knowhere.cluster.* pass-through params verbatim; cardinal reads what it needs
+    // Forward knowhere.cluster.* pass-through params verbatim; knowhere reads what it needs
     // and applies its own defaults for absent keys.
     for (const auto& kv : config.cluster_params()) {
         cluster_conf[kv.first] = kv.second;

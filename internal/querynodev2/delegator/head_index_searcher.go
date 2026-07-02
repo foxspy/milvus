@@ -41,19 +41,19 @@ var newHeadIndexSearcherFromPath = func(headIndexPath string) (headIndexSearcher
 	if searcher == nil {
 		return nil, nil
 	}
-	cardinalSearcher := searcher.(*cardinalHeadIndexSearcher)
-	if err := cardinalSearcher.load(); err != nil {
+	impl := searcher.(*headIndexSearcherImpl)
+	if err := impl.load(); err != nil {
 		return nil, err
 	}
 	return searcher, nil
 }
 
-type cardinalHeadIndexSearcher struct {
+type headIndexSearcherImpl struct {
 	headIndexPath string
 	storageConfig cStorageConfig
 
 	mut sync.Mutex
-	ptr C.CCardinalHeadIndex
+	ptr C.CHeadIndex
 }
 
 type cStorageConfig struct {
@@ -81,11 +81,11 @@ func newHeadIndexSearcher(headIndexPath string) headIndexSearcher {
 	if headIndexPath == "" {
 		return nil
 	}
-	searcher := &cardinalHeadIndexSearcher{
+	searcher := &headIndexSearcherImpl{
 		headIndexPath: headIndexPath,
 		storageConfig: newHeadIndexStorageConfig(),
 	}
-	runtime.SetFinalizer(searcher, func(searcher *cardinalHeadIndexSearcher) {
+	runtime.SetFinalizer(searcher, func(searcher *headIndexSearcherImpl) {
 		searcher.close()
 	})
 	return searcher
@@ -121,7 +121,7 @@ func newHeadIndexStorageConfig() cStorageConfig {
 	}
 }
 
-func (s *cardinalHeadIndexSearcher) Search(ctx context.Context, req *internalpb.SearchRequest, topK int64) ([][]centroidHit, error) {
+func (s *headIndexSearcherImpl) Search(ctx context.Context, req *internalpb.SearchRequest, topK int64) ([][]centroidHit, error) {
 	_ = ctx
 	vectors, dim, ok, err := parseHeadIndexSearchFloatVectors(req)
 	if err != nil {
@@ -140,7 +140,7 @@ func (s *cardinalHeadIndexSearcher) Search(ctx context.Context, req *internalpb.
 	nq := int64(len(vectors)) / dim
 	ids := make([]int64, nq*topK)
 	distances := make([]float32, nq*topK)
-	status := C.SearchCardinalHeadIndex(
+	status := C.SearchHeadIndex(
 		s.ptr,
 		(*C.float)(unsafe.Pointer(&vectors[0])),
 		C.int64_t(nq),
@@ -165,7 +165,7 @@ func (s *cardinalHeadIndexSearcher) Search(ctx context.Context, req *internalpb.
 	return result, nil
 }
 
-func (s *cardinalHeadIndexSearcher) load() error {
+func (s *headIndexSearcherImpl) load() error {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 	if s.ptr != nil {
@@ -177,8 +177,8 @@ func (s *cardinalHeadIndexSearcher) load() error {
 	cConfig, cleanup := s.storageConfig.toC()
 	defer cleanup()
 
-	var ptr C.CCardinalHeadIndex
-	status := C.LoadCardinalHeadIndex(&ptr, cConfig, cPath)
+	var ptr C.CHeadIndex
+	status := C.LoadHeadIndex(&ptr, cConfig, cPath)
 	if err := handleHeadIndexCStatus(&status, "load global head index"); err != nil {
 		return err
 	}
@@ -186,13 +186,13 @@ func (s *cardinalHeadIndexSearcher) load() error {
 	return nil
 }
 
-func (s *cardinalHeadIndexSearcher) close() {
+func (s *headIndexSearcherImpl) close() {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 	if s.ptr == nil {
 		return
 	}
-	status := C.DeleteCardinalHeadIndex(s.ptr)
+	status := C.DeleteHeadIndex(s.ptr)
 	if err := handleHeadIndexCStatus(&status, "delete global head index"); err != nil {
 		log.Warn(fmt.Sprintf("failed to delete global head index: %v", err))
 	}

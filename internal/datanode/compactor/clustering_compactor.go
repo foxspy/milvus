@@ -503,7 +503,7 @@ func (t *clusteringCompactionTask) loadGlobalCompactionPlan(ctx context.Context,
 	if expectedCentroidCount <= 0 {
 		expectedCentroidCount = maxCentroidID + 1
 	}
-	// kmeans may produce empty clusters (centroids with zero assigned rows); cardinal
+	// kmeans may produce empty clusters (centroids with zero assigned rows); knowhere
 	// legitimately omits those from the compaction plan, so the plan covers only the
 	// non-empty centroids (len(seen) <= expectedCentroidCount). Rows only ever reference
 	// non-empty centroids, and mappingSegment/spillSegment error if they hit a centroid

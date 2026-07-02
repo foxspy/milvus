@@ -16,7 +16,7 @@ type knowhereConfig struct {
 	Enable     ParamItem  `refreshable:"true"`
 	IndexParam ParamGroup `refreshable:"true"`
 
-	// knowhere.cluster.* pass-through params for global-index clustering; defaults in cardinal.
+	// knowhere.cluster.* pass-through params for global-index clustering; defaults in knowhere.
 	ClusterParam ParamGroup `refreshable:"true"`
 }
 
@@ -83,7 +83,7 @@ func (p *knowhereConfig) init(base *BaseTable) {
 }
 
 // GetClusterParams returns the knowhere.cluster.* pass-through params (prefix stripped),
-// forwarded to cardinal for global-index clustering. Keys present here override cardinal's
+// forwarded to knowhere for global-index clustering. Keys present here override knowhere's
 // code defaults.
 func (p *knowhereConfig) GetClusterParams() map[string]string {
 	return p.ClusterParam.GetValue()

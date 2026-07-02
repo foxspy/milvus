@@ -129,12 +129,12 @@ CStatus
 LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set);
 
 CStatus
-LoadCardinalHeadIndex(CCardinalHeadIndex* res_index,
+LoadHeadIndex(CHeadIndex* res_index,
                       CStorageConfig storage_config,
                       const char* head_index_path);
 
 CStatus
-SearchCardinalHeadIndex(CCardinalHeadIndex index,
+SearchHeadIndex(CHeadIndex index,
                         const float* query,
                         int64_t nq,
                         int64_t dim,
@@ -143,7 +143,7 @@ SearchCardinalHeadIndex(CCardinalHeadIndex index,
                         float* distances);
 
 CStatus
-DeleteCardinalHeadIndex(CCardinalHeadIndex index);
+DeleteHeadIndex(CHeadIndex index);
 
 #ifdef __cplusplus
 };

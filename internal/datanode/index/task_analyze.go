@@ -215,7 +215,7 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		analyzeInfo.HeadIndexPath = statsPaths.HeadIndex
 		analyzeInfo.ChunkMappingPath = statsPaths.ChunkMapping
 		analyzeInfo.CompactionPlanPath = analyzePaths.CompactionPrePlan
-		// knowhere.cluster.* pass-through; cardinal applies defaults for absent keys.
+		// knowhere.cluster.* pass-through; knowhere applies defaults for absent keys.
 		analyzeInfo.ClusterParams = paramtable.Get().KnowhereConfig.GetClusterParams()
 		analyzeInfo.CompactionMaxRows = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalCompactionMaxRows.GetAsInt64()
 		if analyzeInfo.CompactionMaxRows <= 0 && analyzeInfo.GetDim() > 0 {

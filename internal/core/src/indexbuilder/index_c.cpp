@@ -117,7 +117,7 @@ class GlobalHeadIndexFileManager : public milvus::FileManager {
     std::string head_index_path_;
 };
 
-struct CardinalHeadIndexHandle {
+struct HeadIndexHandle {
     knowhere::Index<knowhere::IndexNode> index;
     std::shared_ptr<GlobalHeadIndexFileManager> file_manager;
 };
@@ -1134,7 +1134,7 @@ SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result) {
 }
 
 CStatus
-LoadCardinalHeadIndex(CCardinalHeadIndex* res_index,
+LoadHeadIndex(CHeadIndex* res_index,
                       CStorageConfig c_storage_config,
                       const char* head_index_path) {
     SCOPE_CGO_CALL_METRIC();
@@ -1142,9 +1142,9 @@ LoadCardinalHeadIndex(CCardinalHeadIndex* res_index,
     auto status = CStatus();
     try {
         AssertInfo(res_index,
-                   "failed to load cardinal head index, passed index was null");
+                   "failed to load head index, passed index was null");
         AssertInfo(head_index_path != nullptr && strlen(head_index_path) > 0,
-                   "failed to load cardinal head index, path is empty");
+                   "failed to load head index, path is empty");
 
         auto storage_config = milvus::storage::StorageConfig();
         storage_config.address = c_storage_config.address == nullptr
@@ -1232,7 +1232,7 @@ LoadCardinalHeadIndex(CCardinalHeadIndex* res_index,
             knowhere::IndexFactory::Instance().Create<knowhere::fp32>(
                 knowhere::IndexEnum::INDEX_HNSW, 9, file_manager_pack);
         AssertInfo(index_or.has_value(),
-                   "failed to create cardinal head index: {}",
+                   "failed to create head index: {}",
                    index_or.what());
 
         auto index = std::move(index_or.value());
@@ -1240,10 +1240,10 @@ LoadCardinalHeadIndex(CCardinalHeadIndex* res_index,
         auto deserialize_status = index.Deserialize(
             empty_binary_set, BuildHeadIndexKnowhereConfig(1, 1));
         AssertInfo(deserialize_status == knowhere::Status::success,
-                   "failed to deserialize cardinal head index, status: {}",
+                   "failed to deserialize head index, status: {}",
                    KnowhereStatusString(deserialize_status));
 
-        *res_index = new CardinalHeadIndexHandle{
+        *res_index = new HeadIndexHandle{
             std::move(index),
             std::move(file_manager),
         };
@@ -1258,7 +1258,7 @@ LoadCardinalHeadIndex(CCardinalHeadIndex* res_index,
 }
 
 CStatus
-SearchCardinalHeadIndex(CCardinalHeadIndex index,
+SearchHeadIndex(CHeadIndex index,
                         const float* query,
                         int64_t nq,
                         int64_t dim,
@@ -1270,15 +1270,15 @@ SearchCardinalHeadIndex(CCardinalHeadIndex index,
     auto status = CStatus();
     try {
         AssertInfo(index,
-                   "failed to search cardinal head index, index is null");
+                   "failed to search head index, index is null");
         AssertInfo(query,
-                   "failed to search cardinal head index, query is null");
-        AssertInfo(ids, "failed to search cardinal head index, ids is null");
-        AssertInfo(nq > 0, "failed to search cardinal head index, nq <= 0");
-        AssertInfo(dim > 0, "failed to search cardinal head index, dim <= 0");
-        AssertInfo(topk > 0, "failed to search cardinal head index, topk <= 0");
+                   "failed to search head index, query is null");
+        AssertInfo(ids, "failed to search head index, ids is null");
+        AssertInfo(nq > 0, "failed to search head index, nq <= 0");
+        AssertInfo(dim > 0, "failed to search head index, dim <= 0");
+        AssertInfo(topk > 0, "failed to search head index, topk <= 0");
 
-        auto* handle = reinterpret_cast<CardinalHeadIndexHandle*>(index);
+        auto* handle = reinterpret_cast<HeadIndexHandle*>(index);
         auto dataset = knowhere::GenDataSet(nq, dim, query);
         auto result =
             handle->index.Search(dataset,
@@ -1286,12 +1286,12 @@ SearchCardinalHeadIndex(CCardinalHeadIndex index,
                                  knowhere::BitsetView(nullptr));
         AssertInfo(
             result.has_value(),
-            "failed to search cardinal head index, status: {}, reason: {}",
+            "failed to search head index, status: {}, reason: {}",
             KnowhereStatusString(result.error()),
             result.what());
         const auto* result_ids = result.value()->GetIds();
         AssertInfo(result_ids != nullptr,
-                   "failed to search cardinal head index, result ids is null");
+                   "failed to search head index, result ids is null");
         const auto* result_distances = result.value()->GetDistance();
         for (int64_t q = 0; q < nq; ++q) {
             for (int64_t k = 0; k < topk; ++k) {
@@ -1315,13 +1315,13 @@ SearchCardinalHeadIndex(CCardinalHeadIndex index,
 }
 
 CStatus
-DeleteCardinalHeadIndex(CCardinalHeadIndex index) {
+DeleteHeadIndex(CHeadIndex index) {
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
     try {
         if (index != nullptr) {
-            delete reinterpret_cast<CardinalHeadIndexHandle*>(index);
+            delete reinterpret_cast<HeadIndexHandle*>(index);
         }
         status.error_code = Success;
         status.error_msg = "";
