@@ -66,16 +66,3 @@ func TestChunkMappingValidate(t *testing.T) {
 	mapping[10] = append(mapping[10], Chunk{SegmentID: 1002, Offset: -1, Size: 1})
 	require.Error(t, mapping.Validate())
 }
-
-func TestBuildChunkMappingFromSortedCentroids(t *testing.T) {
-	mapping := BuildChunkMappingFromSortedCentroids(100, []int64{1, 1, 2, 2, 2, 3, 1})
-
-	require.Equal(t, ChunkMapping{
-		1: {
-			{SegmentID: 100, Offset: 0, Size: 2},
-			{SegmentID: 100, Offset: 6, Size: 1},
-		},
-		2: {{SegmentID: 100, Offset: 2, Size: 3}},
-		3: {{SegmentID: 100, Offset: 5, Size: 1}},
-	}, mapping)
-}

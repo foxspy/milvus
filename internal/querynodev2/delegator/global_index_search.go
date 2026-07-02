@@ -43,6 +43,20 @@ const globalIndexSearchConcurrency = 256
 // normal search path (e.g. head index returned unsupported for every stats index).
 var errGlobalIndexSearchInapplicable = errors.New("global index search inapplicable")
 
+// searchHint is one head-index hint for a segment: the local row range of a matched
+// centroid (idOffset = start row, idRange = row count) and the query-to-centroid
+// distance. Passed to the graph index to seed and bound the search.
+type searchHint struct {
+	idOffset   int64
+	idRange    int64
+	idDistance float32
+}
+
+// queryPlan holds, for a single query, the segments it must search mapped to the
+// head-index search hints for that segment. A nil/empty slice means "search this
+// segment without head-index hints" (passthrough / uncovered).
+type queryPlan map[int64][]searchHint
+
 // shouldUseGlobalIndexSearch decides whether the independent per-query head-index
 // search path applies to this request. It is intentionally conservative: anything
 // it cannot handle falls back to the normal search path.
@@ -109,7 +123,7 @@ func (sd *shardDelegator) globalIndexSearch(
 		queryIdx := q
 		g.Go(func() error {
 			querySealed := buildSnapshotForSegments(sealed, perQueryTargets[queryIdx])
-			subReq := sliceSearchRequestSingleQuery(req, tag, phType, queryValues[queryIdx])
+			subReq := sliceSearchRequestSingleQuery(req, tag, phType, queryValues[queryIdx], perQueryTargets[queryIdx])
 			results, err := sd.executeSearchSubTasks(gctx, subReq, querySealed, growing, sealedRowCount)
 			if err != nil {
 				return err
@@ -136,18 +150,27 @@ func (sd *shardDelegator) globalIndexSearch(
 		return nil, err
 	}
 
-	if log.Core().Enabled(zap.DebugLevel) {
+	{
 		totalSearched := make(map[int64]struct{})
+		var hitSegs, passSegs int
 		for _, t := range perQueryTargets {
-			for segID := range t {
+			for segID, hints := range t {
 				totalSearched[segID] = struct{}{}
+				if len(hints) > 0 {
+					hitSegs++
+				} else {
+					passSegs++
+				}
 			}
 		}
-		log.Debug("global index per-query search done",
+		log.Info("[GIDBG-SEGPRUNE] global index per-query search done",
 			zap.Int64("nq", nq),
 			zap.Int("sealedTotal", countSegments(sealed)),
 			zap.Int("unionSearchedSegments", len(totalSearched)),
-			zap.Float64("avgSegmentsPerQuery", avgTargets(perQueryTargets)))
+			zap.Float64("avgSegmentsPerQuery", avgTargets(perQueryTargets)),
+			zap.Float64("avgHeadHitSegsPerQuery", float64(hitSegs)/float64(nq)),
+			zap.Float64("avgPassthroughSegsPerQuery", float64(passSegs)/float64(nq)),
+			zap.Float64("avgEntryPointsPerQuery", avgEntryPoints(perQueryTargets)))
 	}
 	return []*internalpb.SearchResults{merged}, nil
 }
@@ -161,11 +184,11 @@ func (sd *shardDelegator) headIndexTargetsPerQuery(
 	req *querypb.SearchRequest,
 	sealed []SnapshotItem,
 	sealedRowCount map[int64]int64,
-) ([]map[int64]struct{}, bool, error) {
+) ([]queryPlan, bool, error) {
 	nq := req.GetReq().GetNq()
-	targets := make([]map[int64]struct{}, nq)
+	targets := make([]queryPlan, nq)
 	for i := range targets {
-		targets[i] = make(map[int64]struct{})
+		targets[i] = make(queryPlan)
 	}
 
 	nprobe := paramtable.Get().QueryNodeCfg.GlobalIndexSearchNprobe.GetAsInt64()
@@ -205,11 +228,17 @@ func (sd *shardDelegator) headIndexTargetsPerQuery(
 				"head index returned %d query rows, expected nq=%d", len(centroidsPerQuery), nq)
 		}
 		applied = true
-		for q, centroidIDs := range centroidsPerQuery {
-			for _, centroidID := range centroidIDs {
-				for _, chunk := range si.chunkMapping[centroidID] {
+		for q, hits := range centroidsPerQuery {
+			for _, hit := range hits {
+				for _, chunk := range si.chunkMapping[hit.centroidID] {
 					if _, ok := sealedRowCount[chunk.SegmentID]; ok {
-						targets[q][chunk.SegmentID] = struct{}{}
+						// The matched centroid's local row range in this segment plus
+						// the query-to-centroid distance form a graph-search hint.
+						targets[q][chunk.SegmentID] = append(targets[q][chunk.SegmentID], searchHint{
+							idOffset:   chunk.Offset,
+							idRange:    chunk.Size,
+							idDistance: hit.distance,
+						})
 					}
 				}
 			}
@@ -230,7 +259,9 @@ func (sd *shardDelegator) headIndexTargetsPerQuery(
 				continue
 			}
 			for q := int64(0); q < nq; q++ {
-				targets[q][seg.SegmentID] = struct{}{}
+				if _, ok := targets[q][seg.SegmentID]; !ok {
+					targets[q][seg.SegmentID] = nil // search this segment, no head-index seed
+				}
 			}
 		}
 	}
@@ -239,12 +270,12 @@ func (sd *shardDelegator) headIndexTargetsPerQuery(
 
 // buildSnapshotForSegments rebuilds SnapshotItems keeping only the given segment IDs,
 // preserving the original NodeID grouping.
-func buildSnapshotForSegments(sealed []SnapshotItem, segIDs map[int64]struct{}) []SnapshotItem {
+func buildSnapshotForSegments(sealed []SnapshotItem, plan queryPlan) []SnapshotItem {
 	out := make([]SnapshotItem, 0, len(sealed))
 	for _, item := range sealed {
 		segs := make([]SegmentEntry, 0, len(item.Segments))
 		for _, seg := range item.Segments {
-			if _, ok := segIDs[seg.SegmentID]; ok {
+			if _, ok := plan[seg.SegmentID]; ok {
 				segs = append(segs, seg)
 			}
 		}
@@ -270,8 +301,9 @@ func splitPlaceholderGroup(phgBytes []byte) (string, commonpb.PlaceholderType, [
 }
 
 // sliceSearchRequestSingleQuery clones req into an nq=1 sub-request carrying only the
-// given query vector value.
-func sliceSearchRequestSingleQuery(req *querypb.SearchRequest, tag string, phType commonpb.PlaceholderType, value []byte) *querypb.SearchRequest {
+// given query vector value. plan provides the head-index entry-point seeds per output
+// segment, attached so segcore can pass them to the graph index for this single query.
+func sliceSearchRequestSingleQuery(req *querypb.SearchRequest, tag string, phType commonpb.PlaceholderType, value []byte, plan queryPlan) *querypb.SearchRequest {
 	phgBytes, _ := proto.Marshal(&commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{{
 			Tag:    tag,
@@ -282,6 +314,26 @@ func sliceSearchRequestSingleQuery(req *querypb.SearchRequest, tag string, phTyp
 	newReq := proto.Clone(req.GetReq()).(*internalpb.SearchRequest)
 	newReq.Nq = 1
 	newReq.PlaceholderGroup = phgBytes
+	if len(plan) > 0 && paramtable.Get().QueryNodeCfg.GlobalIndexSearchEntryPoints.GetAsBool() {
+		searchHints := make(map[int64]*internalpb.SearchHintList, len(plan))
+		for segID, hints := range plan {
+			if len(hints) == 0 {
+				continue
+			}
+			list := &internalpb.SearchHintList{Hints: make([]*internalpb.SearchHint, 0, len(hints))}
+			for _, h := range hints {
+				list.Hints = append(list.Hints, &internalpb.SearchHint{
+					IdOffset:   h.idOffset,
+					IdRange:    h.idRange,
+					IdDistance: h.idDistance,
+				})
+			}
+			searchHints[segID] = list
+		}
+		if len(searchHints) > 0 {
+			newReq.SegmentSearchHints = searchHints
+		}
+	}
 	return &querypb.SearchRequest{
 		Req:             newReq,
 		DmlChannels:     req.GetDmlChannels(),
@@ -337,13 +389,28 @@ func countSegments(sealed []SnapshotItem) int {
 	return n
 }
 
-func avgTargets(targets []map[int64]struct{}) float64 {
+func avgTargets(targets []queryPlan) float64 {
 	if len(targets) == 0 {
 		return 0
 	}
 	total := 0
 	for _, t := range targets {
 		total += len(t)
+	}
+	return float64(total) / float64(len(targets))
+}
+
+// avgEntryPoints reports the average number of head-index entry-point seeds per query
+// (summed across that query's segments).
+func avgEntryPoints(targets []queryPlan) float64 {
+	if len(targets) == 0 {
+		return 0
+	}
+	total := 0
+	for _, t := range targets {
+		for _, seeds := range t {
+			total += len(seeds)
+		}
 	}
 	return float64(total) / float64(len(targets))
 }

@@ -15,6 +15,9 @@ import (
 type knowhereConfig struct {
 	Enable     ParamItem  `refreshable:"true"`
 	IndexParam ParamGroup `refreshable:"true"`
+
+	// knowhere.cluster.* pass-through params for global-index clustering; defaults in cardinal.
+	ClusterParam ParamGroup `refreshable:"true"`
 }
 
 const (
@@ -70,6 +73,20 @@ func (p *knowhereConfig) init(base *BaseTable) {
 		Doc:          "When enable this configuration, the index parameters defined following will be automatically populated as index parameters, without requiring user input.",
 	}
 	p.Enable.Init(base.mgr)
+
+	p.ClusterParam = ParamGroup{
+		KeyPrefix: "knowhere.cluster.",
+		Version:   "2.7.0",
+		Export:    true,
+	}
+	p.ClusterParam.Init(base.mgr)
+}
+
+// GetClusterParams returns the knowhere.cluster.* pass-through params (prefix stripped),
+// forwarded to cardinal for global-index clustering. Keys present here override cardinal's
+// code defaults.
+func (p *knowhereConfig) GetClusterParams() map[string]string {
+	return p.ClusterParam.GetValue()
 }
 
 func (p *knowhereConfig) getIndexParam(indexType string, stage string) map[string]string {

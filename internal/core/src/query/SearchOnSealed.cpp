@@ -91,6 +91,22 @@ SearchOnSealedIndex(const Schema& schema,
     }
 
     dataset->SetIsSparse(is_sparse);
+
+    // Global index head-index search hints: seed the graph search of this segment
+    // with the matched centroids' local row ranges. The worker-batched path provides
+    // per-query hints (outer index = query row); the legacy per-query (nq==1) path
+    // provides a single flat list. Outer size must equal the number of query rows.
+    if (!search_info.search_hints_per_query_.empty() &&
+        static_cast<int64_t>(search_info.search_hints_per_query_.size()) ==
+            num_queries) {
+        dataset->Set(knowhere::kSearchHintsField,
+                     search_info.search_hints_per_query_);
+    } else if (!search_info.search_hints_.empty() && num_queries == 1) {
+        std::vector<std::vector<knowhere::SearchHint>> per_query_hints(
+            1, search_info.search_hints_);
+        dataset->Set(knowhere::kSearchHintsField, std::move(per_query_hints));
+    }
+
     auto accessor =
         SemiInlineGet(field_indexing->indexing_->PinCells(op_context, {0}));
     auto vec_index =

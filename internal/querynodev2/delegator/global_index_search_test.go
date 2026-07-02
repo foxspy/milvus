@@ -37,7 +37,7 @@ import (
 // the request (the global_index_plan_test.go fakeHeadIndexSearcher always succeeds).
 type unsupportedHeadIndexSearcher struct{}
 
-func (unsupportedHeadIndexSearcher) Search(ctx context.Context, req *internalpb.SearchRequest, topK int64) ([][]int64, error) {
+func (unsupportedHeadIndexSearcher) Search(ctx context.Context, req *internalpb.SearchRequest, topK int64) ([][]centroidHit, error) {
 	return nil, errHeadIndexSearchUnsupported
 }
 
@@ -47,8 +47,8 @@ func newTestDelegatorWithGlobalStats() *shardDelegator {
 			"root1": {
 				root: "root1",
 				chunkMapping: globalindex.ChunkMapping{
-					1: {{SegmentID: 10, Offset: 0, Size: 5}},
-					2: {{SegmentID: 20, Offset: 0, Size: 5}},
+					1: {{SegmentID: 10, Offset: 3, Size: 5}},
+					2: {{SegmentID: 20, Offset: 7, Size: 5}},
 				},
 				headIndexSearcher: fakeHeadIndexSearcher{centroidIDs: [][]int64{{1}, {2}}},
 			},
@@ -73,8 +73,19 @@ func TestGlobalIndexSearch_TargetsPerQuery(t *testing.T) {
 	require.True(t, applied)
 	require.Len(t, targets, 2)
 
-	assert.Equal(t, map[int64]struct{}{10: {}, 30: {}}, targets[0])
-	assert.Equal(t, map[int64]struct{}{20: {}, 30: {}}, targets[1])
+	// query 0: head-index segment 10 (hint: offset 3, range 5, dist=centroid 1) + passthrough 30 (no hint)
+	require.Len(t, targets[0], 2)
+	require.Len(t, targets[0][10], 1)
+	assert.Equal(t, searchHint{idOffset: 3, idRange: 5, idDistance: 1}, targets[0][10][0])
+	_, has30 := targets[0][30]
+	assert.True(t, has30)
+	assert.Nil(t, targets[0][30])
+
+	// query 1: head-index segment 20 (hint: offset 7, range 5, dist=centroid 2) + passthrough 30
+	require.Len(t, targets[1], 2)
+	require.Len(t, targets[1][20], 1)
+	assert.Equal(t, searchHint{idOffset: 7, idRange: 5, idDistance: 2}, targets[1][20][0])
+
 	// Critical: the two queries do NOT share a unioned segment set.
 	assert.NotContains(t, targets[0], int64(20))
 	assert.NotContains(t, targets[1], int64(10))
@@ -142,8 +153,21 @@ func TestGlobalIndexSearch_SlicePlaceholder(t *testing.T) {
 	assert.Equal(t, commonpb.PlaceholderType_FloatVector, phType)
 
 	req := &querypb.SearchRequest{Req: &internalpb.SearchRequest{Nq: 2, PlaceholderGroup: phgBytes}}
-	sub := sliceSearchRequestSingleQuery(req, tag, phType, values[1])
+	plan := queryPlan{ // seg 10 has hints, seg 20 passthrough
+		10: []searchHint{{idOffset: 3, idRange: 5, idDistance: 1.5}, {idOffset: 8, idRange: 2, idDistance: 2.5}},
+		20: nil,
+	}
+	sub := sliceSearchRequestSingleQuery(req, tag, phType, values[1], plan)
 	assert.Equal(t, int64(1), sub.GetReq().GetNq())
+
+	// search hints attached only for segments with hints
+	hints := sub.GetReq().GetSegmentSearchHints()
+	require.Contains(t, hints, int64(10))
+	require.Len(t, hints[10].GetHints(), 2)
+	assert.Equal(t, int64(3), hints[10].GetHints()[0].GetIdOffset())
+	assert.Equal(t, int64(5), hints[10].GetHints()[0].GetIdRange())
+	assert.Equal(t, float32(1.5), hints[10].GetHints()[0].GetIdDistance())
+	assert.NotContains(t, hints, int64(20))
 
 	subGroup := &commonpb.PlaceholderGroup{}
 	require.NoError(t, proto.Unmarshal(sub.GetReq().GetPlaceholderGroup(), subGroup))

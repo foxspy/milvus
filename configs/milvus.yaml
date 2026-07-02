@@ -748,22 +748,18 @@ dataCoord:
       preferSegmentSizeRatio: 0.8
       maxSegmentSizeRatio: 1
       maxTrainSizeRatio: 0.8 # max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit
-      maxCentroidsNum: 10240 # maximum centroids number in Kmeans train
+      maxCentroidsNum: 2000000 # maximum centroids number in Kmeans train
       minCentroidsNum: 16 # minimum centroids number in Kmeans train
       minClusterSizeRatio: 0.01 # minimum cluster size / avg size in Kmeans train
       maxClusterSizeRatio: 10 # maximum cluster size / avg size in Kmeans train
       maxClusterSize: 5g # maximum cluster size in Kmeans train
       globalIndex:
         enable: false # Enable global index analyze and compaction planning for vector clustering compaction
-        trainMethod: index # Cardinal global index train method for AnalyzeV2: index/kmeans/fastkmeans
-        assignMethod: index # Cardinal global index assign method for AnalyzeV2: index/kmeans
+        # Clustering mechanics (train/assign method, kmeans, centroid/head/assign index build) moved to
+        # knowhere.cluster.* pass-through params; defaults live in cardinal.
         compactionMaxRows: 0 # Target max rows per AnalyzeV2 compaction group. Zero uses max segment rows
         compactionMinRows: 0 # Target min rows for AnalyzeV2 compaction group packing
         numRowsPerCentroid: 100 # Target rows per centroid for global index AnalyzeV2
-        kmeansMaxIter: 10 # Max kmeans iterations for AnalyzeV2 Cardinal clustering
-        kmeansRandomState: 0 # Random state for AnalyzeV2 Cardinal clustering
-        kmeansFastMode: 0 # Cardinal kmeansfast mode for AnalyzeV2
-        kmeansFastEpsilon: 1.5 # Cardinal kmeansfast epsilon for AnalyzeV2
   syncSegmentsInterval: 300 # The time interval for regularly syncing segments
   index:
     memSizeEstimateMultiplier: 2 # When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data

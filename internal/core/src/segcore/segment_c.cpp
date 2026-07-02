@@ -367,11 +367,40 @@ AsyncSearch(CTraceContext c_trace,
             uint64_t collection_ttl,
             uint64_t entity_ttl_physical_time_us,
             bool filter_only,
-            bool enable_expr_cache) {
+            bool enable_expr_cache,
+            const int64_t* hint_offsets,
+            const int64_t* hint_ranges,
+            const float* hint_distances,
+            int64_t hint_count,
+            const int64_t* pq_query_indices,
+            const int64_t* pq_hint_counts,
+            int64_t pq_num) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<milvus::query::Plan*>(c_plan);
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
         c_placeholder_group);
+    // Assemble per-call (per-segment) head-index search hints from the flat C arrays.
+    std::vector<knowhere::SearchHint> all_hints;
+    if (hint_count > 0 && hint_offsets != nullptr && hint_ranges != nullptr &&
+        hint_distances != nullptr) {
+        all_hints.reserve(hint_count);
+        for (int64_t i = 0; i < hint_count; ++i) {
+            all_hints.push_back(
+                knowhere::SearchHint{static_cast<int32_t>(hint_offsets[i]),
+                                     static_cast<int32_t>(hint_ranges[i]),
+                                     hint_distances[i]});
+        }
+    }
+    // Worker-batched path: copy the (query row, hint count) grouping so the per-query
+    // seed vector can be assembled once num_queries is known inside the async task.
+    const bool per_query_mode = pq_num > 0 && pq_query_indices != nullptr &&
+                                pq_hint_counts != nullptr;
+    std::vector<int64_t> pq_indices;
+    std::vector<int64_t> pq_counts;
+    if (per_query_mode) {
+        pq_indices.assign(pq_query_indices, pq_query_indices + pq_num);
+        pq_counts.assign(pq_hint_counts, pq_hint_counts + pq_num);
+    }
     auto future = milvus::futures::Future<milvus::SearchResult>::async(
         milvus::futures::getSearchCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
@@ -384,7 +413,12 @@ AsyncSearch(CTraceContext c_trace,
          collection_ttl,
          entity_ttl_physical_time_us,
          filter_only,
-         enable_expr_cache](folly::CancellationToken cancel_token) {
+         enable_expr_cache,
+         per_query_mode,
+         all_hints = std::move(all_hints),
+         pq_indices = std::move(pq_indices),
+         pq_counts = std::move(pq_counts)](
+            folly::CancellationToken cancel_token) {
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
@@ -398,6 +432,31 @@ AsyncSearch(CTraceContext c_trace,
             const int64_t num_queries = milvus::query::GetNumOfQueries(phg_ptr);
             auto target_vector_field_id =
                 plan->plan_node_->search_info_.field_id_;
+
+            // Worker-batched path: scatter the flat hints into per-query seeds
+            // (outer index = query row). Passed instead of the flat search_hints.
+            std::vector<knowhere::SearchHint> flat_hints;
+            std::vector<std::vector<knowhere::SearchHint>> per_query_hints;
+            if (per_query_mode) {
+                per_query_hints.resize(num_queries);
+                int64_t consumed = 0;
+                for (size_t a = 0; a < pq_indices.size(); ++a) {
+                    const int64_t q = pq_indices[a];
+                    const int64_t cnt = pq_counts[a];
+                    if (q < 0 || q >= num_queries || cnt <= 0) {
+                        consumed += cnt > 0 ? cnt : 0;
+                        continue;
+                    }
+                    if (consumed + cnt <= static_cast<int64_t>(all_hints.size())) {
+                        per_query_hints[q].assign(all_hints.begin() + consumed,
+                                                  all_hints.begin() + consumed +
+                                                      cnt);
+                    }
+                    consumed += cnt;
+                }
+            } else {
+                flat_hints = std::move(all_hints);
+            }
 
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
@@ -420,7 +479,9 @@ AsyncSearch(CTraceContext c_trace,
                                                 collection_ttl,
                                                 entity_ttl_physical_time_us,
                                                 filter_only,
-                                                enable_expr_cache);
+                                                enable_expr_cache,
+                                                flat_hints,
+                                                per_query_hints);
             }
             if (!filter_only &&
                 !milvus::PositivelyRelated(

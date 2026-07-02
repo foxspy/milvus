@@ -143,7 +143,10 @@ SegmentInternalInterface::Search(
     Timestamp collection_ttl,
     int64_t entity_ttl_physical_time_us,
     bool filter_only,
-    bool enable_expr_cache) const {
+    bool enable_expr_cache,
+    const std::vector<knowhere::SearchHint>& search_hints,
+    const std::vector<std::vector<knowhere::SearchHint>>& search_hints_per_query)
+    const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
 
@@ -157,6 +160,12 @@ SegmentInternalInterface::Search(
                                        entity_ttl_physical_time_us);
     visitor.SetFilterOnly(filter_only);
     visitor.SetEnableExprCache(enable_expr_cache);
+    if (!search_hints.empty()) {
+        visitor.SetSearchHints(search_hints);
+    }
+    if (!search_hints_per_query.empty()) {
+        visitor.SetSearchHintsPerQuery(search_hints_per_query);
+    }
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;

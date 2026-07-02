@@ -1263,7 +1263,8 @@ SearchCardinalHeadIndex(CCardinalHeadIndex index,
                         int64_t nq,
                         int64_t dim,
                         int64_t topk,
-                        int64_t* ids) {
+                        int64_t* ids,
+                        float* distances) {
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -1291,9 +1292,16 @@ SearchCardinalHeadIndex(CCardinalHeadIndex index,
         const auto* result_ids = result.value()->GetIds();
         AssertInfo(result_ids != nullptr,
                    "failed to search cardinal head index, result ids is null");
+        const auto* result_distances = result.value()->GetDistance();
         for (int64_t q = 0; q < nq; ++q) {
             for (int64_t k = 0; k < topk; ++k) {
                 ids[q * topk + k] = result_ids[q * topk + k];
+                if (distances != nullptr) {
+                    distances[q * topk + k] =
+                        result_distances != nullptr
+                            ? result_distances[q * topk + k]
+                            : 0.0f;
+                }
             }
         }
 

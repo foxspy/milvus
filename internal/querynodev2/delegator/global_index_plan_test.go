@@ -24,8 +24,14 @@ type fakeHeadIndexSearcher struct {
 	centroidIDs [][]int64
 }
 
-func (s fakeHeadIndexSearcher) Search(ctx context.Context, req *internalpb.SearchRequest, topK int64) ([][]int64, error) {
-	return s.centroidIDs, nil
+func (s fakeHeadIndexSearcher) Search(ctx context.Context, req *internalpb.SearchRequest, topK int64) ([][]centroidHit, error) {
+	result := make([][]centroidHit, len(s.centroidIDs))
+	for q, ids := range s.centroidIDs {
+		for _, id := range ids {
+			result[q] = append(result[q], centroidHit{centroidID: id, distance: float32(id)})
+		}
+	}
+	return result, nil
 }
 
 func TestParseHeadIndexSearchFloatVectors(t *testing.T) {

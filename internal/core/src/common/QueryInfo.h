@@ -17,10 +17,12 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "ArrayOffsets.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "knowhere/comp/search_hint.h"
 #include "knowhere/config.h"
 
 namespace milvus {
@@ -53,6 +55,19 @@ struct SearchInfo {
     bool global_refine_enable_{false};
     float search_topk_ratio_{0.0f};
     float refine_topk_ratio_{0.0f};
+    // Global index head-index search hints (graph-search seeds) for this segment.
+    // Each hint is a matched centroid's local row range plus query-to-centroid
+    // distance; empty means default (graph) entry point. Set per-call by the global
+    // index per-query search path. Carried per-call (never via the shared plan) so
+    // concurrent per-segment searches do not race.
+    std::vector<knowhere::SearchHint> search_hints_;
+    // Worker-batched global index search: per-query graph-search seeds for this
+    // segment. Outer index is the query row (0..num_queries-1); an empty inner
+    // vector means that query uses the default entry point. Set per-call by the
+    // worker-batched global index search path (segment x query marking). Preferred
+    // over search_hints_ when non-empty. Carried per-call so concurrent per-segment
+    // searches do not race.
+    std::vector<std::vector<knowhere::SearchHint>> search_hints_per_query_;
 
     bool
     element_level() const {

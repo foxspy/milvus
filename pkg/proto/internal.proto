@@ -170,6 +170,48 @@ message SearchRequest {
   int32 pk_filter = 32;
   SearchType search_type = 33;
   repeated int64 group_by_field_ids = 34;
+  // Global index head-index search hints: for an nq=1 per-query sub-request, maps an
+  // output segment id to the graph-search hints in that segment. Each hint comes from
+  // a head-index-matched centroid: the centroid's local row range in this segment plus
+  // the query-to-centroid distance. Empty means default (graph) entry point. Set only
+  // by the per-query global index search path.
+  map<int64, SearchHintList> segment_search_hints = 35;
+  // Global index worker-batched search: segment id -> the queries that must search
+  // that segment, each with its own head-index entry-point hints. The query_index of
+  // each task points into this request's placeholder_group (a per-worker batch of the
+  // queries whose target segments live on this worker). Finest granularity is the
+  // (segment, query) pair: on a segment, segcore only runs the marked queries, each
+  // with its own seeds. Set only by the worker-batched global index search path; empty
+  // otherwise. Mutually exclusive with segment_search_hints.
+  map<int64, SegmentSearchTasks> segment_query_tasks = 36;
+}
+
+// SearchHint is one global-index head-index hint for a segment: the local row range of
+// a matched centroid (id_offset = start row, id_range = row count) and the query-to-
+// centroid distance, used by the graph index to seed and bound the search.
+message SearchHint {
+  int64 id_offset = 1;
+  int64 id_range = 2;
+  float id_distance = 3;
+}
+
+// SearchHintList wraps a repeated SearchHint so it can be used as a protobuf map value.
+message SearchHintList {
+  repeated SearchHint hints = 1;
+}
+
+// SegmentQueryTask marks that one query (query_index into this request's placeholder
+// group) must search a given segment, carrying that query's head-index entry-point
+// hints in that segment. Empty hints means passthrough (search without head-index seed).
+message SegmentQueryTask {
+  int32 query_index = 1;
+  SearchHintList hints = 2;
+}
+
+// SegmentSearchTasks lists which queries search one segment (segment x query sparse
+// marking), used as the protobuf map value for segment_query_tasks.
+message SegmentSearchTasks {
+  repeated SegmentQueryTask tasks = 1;
 }
 
 message SubSearchResults {

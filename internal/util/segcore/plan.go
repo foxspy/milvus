@@ -30,6 +30,7 @@ import (
 	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -90,6 +91,33 @@ type SearchRequest struct {
 	entityTTLPhysicalTime typeutil.Timestamp
 	filterOnly            bool // If true, only execute filter and return valid count (for two-stage search Stage 1)
 	enableExprCache       bool // If true, enable expression filter cache for two-stage search
+	// segmentSearchHints maps an output segment id to head-index search hints
+	// (per matched centroid: local row range + query-to-centroid distance) for the
+	// global index per-query search path. Empty for normal search. Consumed
+	// per-segment in cSegmentImpl.Search.
+	segmentSearchHints map[int64][]*internalpb.SearchHint
+	// segmentQueryTasks maps an output segment id to the queries that search it and
+	// their per-query head-index seeds (segment x query marking), for the worker-
+	// batched global index search path. Empty for other paths.
+	segmentQueryTasks map[int64]*internalpb.SegmentSearchTasks
+}
+
+// SegmentSearchHints returns the head-index search hints for the given segment id
+// (nil if none), used by the global index per-query search path.
+func (req *SearchRequest) SegmentSearchHints(segmentID int64) []*internalpb.SearchHint {
+	if req.segmentSearchHints == nil {
+		return nil
+	}
+	return req.segmentSearchHints[segmentID]
+}
+
+// SegmentQueryTasks returns the per-query search tasks for the given segment id (nil
+// if none), used by the worker-batched global index search path.
+func (req *SearchRequest) SegmentQueryTasks(segmentID int64) *internalpb.SegmentSearchTasks {
+	if req.segmentQueryTasks == nil {
+		return nil
+	}
+	return req.segmentQueryTasks[segmentID]
 }
 
 func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
@@ -129,6 +157,25 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 
 	cl := req.GetReq().GetConsistencyLevel()
 
+	var segmentSearchHints map[int64][]*internalpb.SearchHint
+	if hints := req.GetReq().GetSegmentSearchHints(); len(hints) > 0 {
+		segmentSearchHints = make(map[int64][]*internalpb.SearchHint, len(hints))
+		for segID, list := range hints {
+			if h := list.GetHints(); len(h) > 0 {
+				segmentSearchHints[segID] = h
+			}
+		}
+	}
+
+	var segmentQueryTasks map[int64]*internalpb.SegmentSearchTasks
+	if tasks := req.GetReq().GetSegmentQueryTasks(); len(tasks) > 0 {
+		segmentQueryTasks = make(map[int64]*internalpb.SegmentSearchTasks, len(tasks))
+		for segID, list := range tasks {
+			if len(list.GetTasks()) > 0 {
+				segmentQueryTasks[segID] = list
+			}
+		}
+	}
 	return &SearchRequest{
 		plan:                  plan,
 		cPlaceholderGroup:     cPlaceholderGroup,
@@ -140,6 +187,8 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		entityTTLPhysicalTime: req.GetReq().GetEntityTtlPhysicalTime(),
 		filterOnly:            req.GetFilterOnly(),
 		enableExprCache:       req.GetEnableExprCache(),
+		segmentSearchHints:    segmentSearchHints,
+		segmentQueryTasks:     segmentQueryTasks,
 	}, nil
 }
 

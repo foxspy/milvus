@@ -46,6 +46,8 @@ func ShallowCopySearchRequest(src *internalpb.SearchRequest, targetID int64) *in
 		PkFilter:                src.PkFilter,
 		SearchType:              src.SearchType,
 		GroupByFieldIds:         src.GroupByFieldIds,
+		SegmentSearchHints:      src.SegmentSearchHints,
+		SegmentQueryTasks:       src.SegmentQueryTasks,
 	}
 }
 

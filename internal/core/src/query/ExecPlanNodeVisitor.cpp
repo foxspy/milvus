@@ -502,6 +502,15 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
         entity_ttl_physical_time_us_);
 
     query_context->set_search_info(node.search_info_);
+    if (!search_hints_.empty()) {
+        // Inject per-call hints into the per-call query_context's (copied)
+        // search_info, never into the shared plan node.
+        query_context->set_search_hints(search_hints_);
+    }
+    if (!search_hints_per_query_.empty()) {
+        // Worker-batched path: per-query seeds for this segment.
+        query_context->set_search_hints_per_query(search_hints_per_query_);
+    }
     query_context->set_placeholder_group(placeholder_group_);
     if (enable_expr_cache_) {
         query_context->set_enable_expr_cache(true);

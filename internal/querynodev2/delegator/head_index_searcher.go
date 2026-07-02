@@ -121,7 +121,7 @@ func newHeadIndexStorageConfig() cStorageConfig {
 	}
 }
 
-func (s *cardinalHeadIndexSearcher) Search(ctx context.Context, req *internalpb.SearchRequest, topK int64) ([][]int64, error) {
+func (s *cardinalHeadIndexSearcher) Search(ctx context.Context, req *internalpb.SearchRequest, topK int64) ([][]centroidHit, error) {
 	_ = ctx
 	vectors, dim, ok, err := parseHeadIndexSearchFloatVectors(req)
 	if err != nil {
@@ -139,6 +139,7 @@ func (s *cardinalHeadIndexSearcher) Search(ctx context.Context, req *internalpb.
 
 	nq := int64(len(vectors)) / dim
 	ids := make([]int64, nq*topK)
+	distances := make([]float32, nq*topK)
 	status := C.SearchCardinalHeadIndex(
 		s.ptr,
 		(*C.float)(unsafe.Pointer(&vectors[0])),
@@ -146,17 +147,18 @@ func (s *cardinalHeadIndexSearcher) Search(ctx context.Context, req *internalpb.
 		C.int64_t(dim),
 		C.int64_t(topK),
 		(*C.int64_t)(unsafe.Pointer(&ids[0])),
+		(*C.float)(unsafe.Pointer(&distances[0])),
 	)
 	if err := handleHeadIndexCStatus(&status, "search global head index"); err != nil {
 		return nil, err
 	}
 
-	result := make([][]int64, nq)
+	result := make([][]centroidHit, nq)
 	for q := int64(0); q < nq; q++ {
 		for k := int64(0); k < topK; k++ {
 			id := ids[q*topK+k]
 			if id >= 0 {
-				result[q] = append(result[q], id)
+				result[q] = append(result[q], centroidHit{centroidID: id, distance: distances[q*topK+k]})
 			}
 		}
 	}

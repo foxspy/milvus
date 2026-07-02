@@ -30,8 +30,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// centroidHit is one head-index match for a query: a centroid id and the query-to-
+// centroid distance, used to build per-segment search hints.
+type centroidHit struct {
+	centroidID int64
+	distance   float32
+}
+
 type headIndexSearcher interface {
-	Search(ctx context.Context, req *internalpb.SearchRequest, topK int64) ([][]int64, error)
+	Search(ctx context.Context, req *internalpb.SearchRequest, topK int64) ([][]centroidHit, error)
 }
 
 type loadedGlobalStatsIndex struct {

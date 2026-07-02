@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/globalindex"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -103,6 +102,9 @@ type clusteringCompactionTask struct {
 	// vector
 	segmentIDOffsetMapping map[int64]string
 	offsetToBufferFunc     func(int64, []uint32) *ClusterBuffer
+	// centroidGroupIndex maps a centroid id to its group (output bucket) index.
+	// Used by the global-index sorted layout path to partition rows by group.
+	centroidGroupIndex map[int]int
 	// bm25
 	bm25FieldIds []int64
 
@@ -116,7 +118,6 @@ type ClusterBuffer struct {
 	id                      int
 	writer                  *MultiSegmentWriter
 	clusteringKeyFieldStats *storage.FieldStats
-	centroidIDs             []int64
 
 	lock sync.RWMutex
 }
@@ -251,6 +252,11 @@ func (t *clusteringCompactionTask) init() error {
 	t.primaryKeyField = pkField
 	t.ttlFieldID = getTTLFieldID(t.plan.GetSchema())
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
+	// The global-index sorted-layout path does not yet support spilling/merging
+	// TEXT/LOB columns (REWRITE_ALL semantics); reject such schemas explicitly.
+	if t.useGlobalIndexSort() && len(compaction.GetTEXTFieldIDsFromSchema(t.plan.GetSchema())) > 0 {
+		return merr.WrapErrServiceInternalMsg("global index clustering compaction does not support TEXT/LOB columns yet")
+	}
 	t.currentTime = time.Now()
 	t.memoryLimit = t.getMemoryLimit()
 	t.bufferSize = int64(t.compactionParams.BinLogMaxSize) // Use binlog max size as read and write buffer size
@@ -497,11 +503,23 @@ func (t *clusteringCompactionTask) loadGlobalCompactionPlan(ctx context.Context,
 	if expectedCentroidCount <= 0 {
 		expectedCentroidCount = maxCentroidID + 1
 	}
-	if len(seen) != expectedCentroidCount {
+	// kmeans may produce empty clusters (centroids with zero assigned rows); cardinal
+	// legitimately omits those from the compaction plan, so the plan covers only the
+	// non-empty centroids (len(seen) <= expectedCentroidCount). Rows only ever reference
+	// non-empty centroids, and mappingSegment/spillSegment error if they hit a centroid
+	// that is missing from the plan, so requiring full coverage here is wrong.
+	if len(seen) > expectedCentroidCount {
 		return nil, merr.WrapErrServiceInternalMsg(
-			"global index compaction plan does not cover all centroids, plan=%d, assigned=%d",
+			"global index compaction plan covers more centroids than exist, plan=%d, assigned=%d",
 			expectedCentroidCount,
 			len(seen))
+	}
+	if len(seen) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("global index compaction plan covers no centroids")
+	}
+	if len(seen) < expectedCentroidCount {
+		log.Info("global index compaction plan omits empty centroids",
+			zap.Int("expected", expectedCentroidCount), zap.Int("assigned", len(seen)))
 	}
 	if len(centroidGroups) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("global index compaction plan has no non-empty groups")
@@ -543,11 +561,11 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, cent
 		}
 
 		buffer := newClusterBuffer(id, writer, fieldStats)
-		buffer.centroidIDs = lo.Map(group, func(centroidID int, _ int) int64 {
-			return int64(centroidID)
-		})
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
 	}
+	// Keep centroid -> group index for the global-index sorted layout path, which
+	// partitions rows by group before sorting them by (centroid, distance).
+	t.centroidGroupIndex = groupIndex
 	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
 		if offset < 0 || offset >= int64(len(idMapping)) {
 			return nil
@@ -561,16 +579,11 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, cent
 	return nil
 }
 
+// switchPolicyForVectorPlan handles the non-global-index vector clustering policy.
+// The global-index path is taken earlier in getVectorAnalyzeResult and never reaches
+// here.
 func (t *clusteringCompactionTask) switchPolicyForVectorPlan(ctx context.Context, centroids *clusteringpb.ClusteringCentroidsStats) error {
 	centroidNum := len(centroids.GetCentroids())
-	if t.plan.GetEnableGlobalIndex() {
-		centroidGroups, err := t.loadGlobalCompactionPlan(ctx, centroidNum)
-		if err != nil {
-			return err
-		}
-		return t.generatedVectorPlan(ctx, centroidGroups, centroids.GetCentroids())
-	}
-
 	bufferNum := centroidNum
 	bufferNumByMemory := int(t.memoryLimit / expectedBinlogSize)
 	if bufferNumByMemory < bufferNum {
@@ -641,6 +654,11 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 ) ([]*datapb.CompactionSegment, *storage.PartitionStatsSnapshot, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mapping-%d", t.GetPlanID()))
 	defer span.End()
+	// Global index needs the output segments strictly sorted by (centroid, distance);
+	// take the dedicated two-phase external-merge-sort path instead of streaming write.
+	if t.useGlobalIndexSort() {
+		return t.mappingGlobalIndexSorted(ctx)
+	}
 	inputSegments := t.plan.GetSegmentBinlogs()
 	mapStart := time.Now()
 	log := log.Ctx(ctx)
@@ -668,9 +686,6 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	// force flush all buffers
 	err := t.flushAll()
 	if err != nil {
-		return nil, nil, err
-	}
-	if err := t.uploadGlobalStatsChunkMapping(ctx); err != nil {
 		return nil, nil, err
 	}
 
@@ -701,60 +716,6 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 		zap.Duration("elapse", time.Since(mapStart)))
 
 	return resultSegments, resultPartitionStats, nil
-}
-
-func (t *clusteringCompactionTask) uploadGlobalStatsChunkMapping(ctx context.Context) error {
-	root := t.plan.GetGlobalStatsIndexRoot()
-	if !t.isVectorClusteringKey || root == "" {
-		return nil
-	}
-
-	mapping := make(globalindex.ChunkMapping)
-	for _, buffer := range t.clusterBuffers {
-		if len(buffer.centroidIDs) == 0 {
-			continue
-		}
-
-		segments := buffer.GetCompactionSegments()
-		chunks := make([]globalindex.Chunk, 0, len(segments))
-		for _, segment := range segments {
-			if segment.GetNumOfRows() <= 0 {
-				continue
-			}
-			chunks = append(chunks, globalindex.Chunk{
-				SegmentID: segment.GetSegmentID(),
-				Offset:    0,
-				Size:      segment.GetNumOfRows(),
-			})
-		}
-		if len(chunks) == 0 {
-			continue
-		}
-
-		for _, centroidID := range buffer.centroidIDs {
-			mapping[centroidID] = append(mapping[centroidID], chunks...)
-		}
-	}
-	if len(mapping) == 0 {
-		if t.writtenRowNum.Load() == 0 {
-			return nil
-		}
-		return merr.WrapErrServiceInternalMsg("global stats chunk mapping is empty, root=%s", root)
-	}
-
-	mappingBytes, err := json.Marshal(mapping)
-	if err != nil {
-		return merr.Wrap(err, "marshal global stats chunk mapping")
-	}
-	chunkMappingPath := path.Join(root, common.GlobalStatsChunkMapping)
-	if err := t.binlogIO.Upload(ctx, map[string][]byte{chunkMappingPath: mappingBytes}); err != nil {
-		return merr.Wrapf(err, "upload global stats chunk mapping %q", chunkMappingPath)
-	}
-	log.Ctx(ctx).Info("uploaded global stats chunk mapping",
-		zap.String("path", chunkMappingPath),
-		zap.Int("centroidCount", len(mapping)),
-		zap.Int("bytes", len(mappingBytes)))
-	return nil
 }
 
 func (t *clusteringCompactionTask) getBufferTotalUsedMemorySize() int64 {

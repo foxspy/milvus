@@ -104,7 +104,10 @@ class SegmentInterface {
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
            bool filter_only = false,
-           bool enable_expr_cache = false) const = 0;
+           bool enable_expr_cache = false,
+           const std::vector<knowhere::SearchHint>& search_hints = {},
+           const std::vector<std::vector<knowhere::SearchHint>>&
+               search_hints_per_query = {}) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -482,7 +485,10 @@ class SegmentInternalInterface : public SegmentInterface {
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
            bool filter_only = false,
-           bool enable_expr_cache = false) const override;
+           bool enable_expr_cache = false,
+           const std::vector<knowhere::SearchHint>& search_hints = {},
+           const std::vector<std::vector<knowhere::SearchHint>>&
+               search_hints_per_query = {}) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,

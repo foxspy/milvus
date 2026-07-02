@@ -156,9 +156,11 @@ class TempFileGuard {
 };
 
 knowhere::Json
-BuildHeadIndexKnowhereConfig(int64_t dim,
-                             int64_t num_clusters,
-                             const std::string& data_path) {
+BuildHeadIndexKnowhereConfig(
+    int64_t dim,
+    int64_t num_clusters,
+    const std::string& data_path,
+    const google::protobuf::Map<std::string, std::string>& cluster_params) {
     const auto graph_width =
         std::max<int64_t>(2, std::min<int64_t>(48, num_clusters - 1));
     const auto build_candidates = std::max<int64_t>(100, graph_width * 4);
@@ -172,7 +174,7 @@ BuildHeadIndexKnowhereConfig(int64_t dim,
     config[knowhere::meta::DATA_PATH] = data_path;
     config["M"] = graph_width;
     config["efConstruction"] = build_candidates;
-    config["graph_build_algo"] = "Vamana";
+    config["graph_build_algo"] = "pipnn";
     config["max_degree"] = graph_width;
     config["search_list_size"] = build_candidates;
     config["index_algo"] = "GRAPH";
@@ -180,6 +182,13 @@ BuildHeadIndexKnowhereConfig(int64_t dim,
     config["search_quant_type"] = "NONE";
     config["refine_quant_type"] = "NONE";
     config["skip_refine"] = false;
+    // knowhere.cluster.head_index_* overrides (strip prefix -> knowhere HNSW config key).
+    const std::string head_prefix = "head_index_";
+    for (const auto& kv : cluster_params) {
+        if (kv.first.rfind(head_prefix, 0) == 0) {
+            config[kv.first.substr(head_prefix.size())] = kv.second;
+        }
+    }
     return config;
 }
 
@@ -207,16 +216,44 @@ WriteHeadIndexTrainData(const T* centroids, int64_t num_clusters, int64_t dim) {
     AssertInfo(writer.good(),
                "failed to write global head index train data: {}",
                temp_path);
+    // [HEAD-CENTROID-DUMP] persist a copy of the exact centroids fed to the head
+    // index build (same data/order as cluster compaction) for offline vecTool
+    // analysis of why the head graph comes out empty. Guarded by env var.
+    if (const char* dump_dir = std::getenv("GLOBAL_HEAD_CENTROID_DUMP_DIR")) {
+        try {
+            std::filesystem::create_directories(dump_dir);
+            auto dump_path =
+                (std::filesystem::path(dump_dir) /
+                 fmt::format("head_centroids_{}_{}x{}_mem.fbin",
+                             std::time(nullptr),
+                             rows,
+                             cols))
+                    .string();
+            std::filesystem::copy_file(
+                temp_path,
+                dump_path,
+                std::filesystem::copy_options::overwrite_existing);
+            LOG_INFO("[HEAD-CENTROID-DUMP] saved {} centroids (dim={}) to {}",
+                     rows,
+                     cols,
+                     dump_path);
+        } catch (const std::exception& e) {
+            LOG_WARN("[HEAD-CENTROID-DUMP] failed to persist centroids: {}",
+                     e.what());
+        }
+    }
     return TempFileGuard(temp_path);
 }
 
 template <typename T>
 void
-BuildAndUploadHeadIndex(const T* centroids,
-                        int64_t num_clusters,
-                        int64_t dim,
-                        const std::string& head_index_path,
-                        milvus_storage::ArrowFileSystemPtr fs) {
+BuildAndUploadHeadIndex(
+    const T* centroids,
+    int64_t num_clusters,
+    int64_t dim,
+    const std::string& head_index_path,
+    milvus_storage::ArrowFileSystemPtr fs,
+    const google::protobuf::Map<std::string, std::string>& cluster_params) {
     AssertInfo(centroids != nullptr,
                "failed to build global head index, centroids is null");
     AssertInfo(!head_index_path.empty(),
@@ -237,7 +274,8 @@ BuildAndUploadHeadIndex(const T* centroids,
     auto head_index = std::move(index_or.value());
     auto dataset = knowhere::GenDataSet(num_clusters, dim, centroids);
     auto index_config =
-        BuildHeadIndexKnowhereConfig(dim, num_clusters, train_data.Path());
+        BuildHeadIndexKnowhereConfig(
+            dim, num_clusters, train_data.Path(), cluster_params);
     auto build_status = head_index.Build(dataset, index_config);
     AssertInfo(build_status == knowhere::Status::success,
                "failed to build global head index, status: {}",
@@ -352,7 +390,13 @@ KmeansClustering::FetchDataFiles(
             fetch(group_files);
         }
     }
-    AssertInfo(fetched_file_size == expected_remote_file_size,
+    // A short read is only an error if we did NOT deliberately stop because the
+    // sampling buffer filled up. When training on a dataset larger than the train
+    // budget (expected_train_size), the boundary segment is intentionally fetched
+    // only partially (size is clamped to the remaining budget), so offset reaching
+    // expected_train_size is a legitimate stop, not a truncated/corrupt file.
+    AssertInfo(fetched_file_size == expected_remote_file_size ||
+                   offset == expected_train_size,
                "file size inconsistent, expected: {}, actual: {}, "
                "storage_info: {}, has_storage_v2_info: {}, "
                "storage_version: {}, storage_insert_file_groups: {}, "
@@ -911,18 +955,11 @@ KmeansClustering::RunV2(const milvus::proto::clustering::AnalyzeInfo& config) {
 
     knowhere::Json cluster_conf;
     cluster_conf[NUM_CLUSTERS] = num_clusters;
-    cluster_conf["global_train_method"] = config.global_train_method().empty()
-                                              ? "index"
-                                              : config.global_train_method();
-    cluster_conf["global_assign_method"] = config.global_assign_method().empty()
-                                               ? "index"
-                                               : config.global_assign_method();
-    cluster_conf["max_iter"] =
-        config.kmeans_max_iter() <= 0 ? 10 : config.kmeans_max_iter();
-    cluster_conf["random_state"] = config.kmeans_random_state();
-    cluster_conf["kmf_mode"] = config.kmeans_fast_mode();
-    cluster_conf["kmf_epsilon"] =
-        config.kmeans_fast_epsilon() <= 0 ? 1.5 : config.kmeans_fast_epsilon();
+    // Forward knowhere.cluster.* pass-through params verbatim; cardinal reads what it needs
+    // and applies its own defaults for absent keys.
+    for (const auto& kv : config.cluster_params()) {
+        cluster_conf[kv.first] = kv.second;
+    }
     cluster_conf["compaction_max_rows"] =
         config.compaction_max_rows() < 0 ? 0 : config.compaction_max_rows();
     cluster_conf["compaction_min_rows"] =
@@ -973,7 +1010,7 @@ KmeansClustering::RunV2(const milvus::proto::clustering::AnalyzeInfo& config) {
     remote_paths_to_size.clear();
 
     BuildAndUploadHeadIndex<T>(
-        centroids, num_clusters, dim, config.head_index_path(), fs_);
+        centroids, num_clusters, dim, config.head_index_path(), fs_, config.cluster_params());
     rc.RecordSection("head index upload done");
 
     auto all_ids = std::make_unique<long long int[]>(data_num);

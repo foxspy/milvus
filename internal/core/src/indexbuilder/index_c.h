@@ -139,7 +139,8 @@ SearchCardinalHeadIndex(CCardinalHeadIndex index,
                         int64_t nq,
                         int64_t dim,
                         int64_t topk,
-                        int64_t* ids);
+                        int64_t* ids,
+                        float* distances);
 
 CStatus
 DeleteCardinalHeadIndex(CCardinalHeadIndex index);

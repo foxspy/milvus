@@ -76,6 +76,7 @@ message AnalyzeInfo {
   int64 kmeans_fast_mode = 29;
   double kmeans_fast_epsilon = 30;
   map<int64, SegmentStorageInfo> segment_storage_infos = 31;
+  map<string, string> cluster_params = 32; // knowhere.cluster.* pass-through; overrides cardinal defaults
 }
 
 message ClusteringCentroidsStats {

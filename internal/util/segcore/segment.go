@@ -151,6 +151,25 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		physicalTimeUs = physicalTimeMs * 1000
 	}
 
+	// Global index head-index search hints for this segment (graph-search seeds).
+	// Legacy per-query (nq==1) path uses flat hints; worker-batched path uses per-query
+	// seeds keyed by query row (pqIndices/pqCounts index into the flat hint arrays).
+	hintOffsets, hintRanges, hintDistances, pqIndices, pqCounts := buildCSearchHints(searchReq, s.id)
+	var cHintOffsets *C.int64_t
+	var cHintRanges *C.int64_t
+	var cHintDistances *C.float
+	if len(hintOffsets) > 0 {
+		cHintOffsets = (*C.int64_t)(unsafe.Pointer(&hintOffsets[0]))
+		cHintRanges = (*C.int64_t)(unsafe.Pointer(&hintRanges[0]))
+		cHintDistances = (*C.float)(unsafe.Pointer(&hintDistances[0]))
+	}
+	var cPqIndices *C.int64_t
+	var cPqCounts *C.int64_t
+	if len(pqIndices) > 0 {
+		cPqIndices = (*C.int64_t)(unsafe.Pointer(&pqIndices[0]))
+		cPqCounts = (*C.int64_t)(unsafe.Pointer(&pqCounts[0]))
+	}
+
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
 			return (cgo.CFuturePtr)(C.AsyncSearch(
@@ -164,10 +183,22 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 				C.uint64_t(physicalTimeUs),
 				C.bool(searchReq.filterOnly),
 				C.bool(searchReq.enableExprCache),
+				cHintOffsets,
+				cHintRanges,
+				cHintDistances,
+				C.int64_t(len(hintOffsets)),
+				cPqIndices,
+				cPqCounts,
+				C.int64_t(len(pqIndices)),
 			))
 		},
 		cgo.WithName("search"),
 	)
+	defer runtime.KeepAlive(hintOffsets)
+	defer runtime.KeepAlive(hintRanges)
+	defer runtime.KeepAlive(hintDistances)
+	defer runtime.KeepAlive(pqIndices)
+	defer runtime.KeepAlive(pqCounts)
 	defer future.Release()
 
 	result, err := future.BlockAndLeakyGet()
@@ -175,6 +206,37 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		return nil, err
 	}
 	return &SearchResult{cSearchResult: (C.CSearchResult)(result)}, nil
+}
+
+// buildCSearchHints flattens a segment's head-index hints for the cgo boundary. It
+// returns the flat (offsets, ranges, distances) hint arrays plus, for the worker-
+// batched path, the per-query grouping (pqIndices[a] = query row, pqCounts[a] = how
+// many flat hints belong to it, consumed in order). The legacy per-query (nq==1) path
+// returns empty pq slices (flat hints only); the two paths are mutually exclusive.
+func buildCSearchHints(req *SearchRequest, segmentID int64) (offsets, ranges []int64, distances []float32, pqIndices, pqCounts []int64) {
+	if tasks := req.SegmentQueryTasks(segmentID); tasks != nil {
+		for _, task := range tasks.GetTasks() {
+			hints := task.GetHints().GetHints()
+			if len(hints) == 0 {
+				continue // passthrough query: no seed on this segment
+			}
+			pqIndices = append(pqIndices, int64(task.GetQueryIndex()))
+			pqCounts = append(pqCounts, int64(len(hints)))
+			for _, h := range hints {
+				offsets = append(offsets, h.GetIdOffset())
+				ranges = append(ranges, h.GetIdRange())
+				distances = append(distances, h.GetIdDistance())
+			}
+		}
+		return offsets, ranges, distances, pqIndices, pqCounts
+	}
+
+	for _, h := range req.SegmentSearchHints(segmentID) {
+		offsets = append(offsets, h.GetIdOffset())
+		ranges = append(ranges, h.GetIdRange())
+		distances = append(distances, h.GetIdDistance())
+	}
+	return offsets, ranges, distances, nil, nil
 }
 
 // Retrieve retrieves entities from the segment.

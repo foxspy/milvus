@@ -601,9 +601,15 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return results, nil
 	}
 
-	// Independent per-query head-index search path (additive, falls back on error).
+	// Independent global index head-index search path (additive, falls back on error).
 	if sd.shouldUseGlobalIndexSearch(req) {
-		if results, err := sd.globalIndexSearch(ctx, req, sealed, growing, sealedRowCount); err != nil {
+		globalSearch := sd.globalIndexSearch
+		if paramtable.Get().QueryNodeCfg.GlobalIndexSearchBatchByWorker.GetAsBool() {
+			// Worker-batched path: one RPC per worker (segment x query marking) instead
+			// of nq independent nq=1 RPCs, collapsing the delegator->querynode RPC count.
+			globalSearch = sd.globalIndexSearchBatched
+		}
+		if results, err := globalSearch(ctx, req, sealed, growing, sealedRowCount); err != nil {
 			log.Warn("global index search failed, fallback to normal search", zap.Error(err))
 		} else {
 			return results, nil

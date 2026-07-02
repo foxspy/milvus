@@ -107,9 +107,9 @@ func (sd *shardDelegator) planGlobalStatsSearch(
 			return nil, false, merr.Wrap(err, "search global head index")
 		}
 		applied = true
-		for _, centroidIDs := range centroidIDsPerQuery {
-			for _, centroidID := range centroidIDs {
-				for _, chunk := range statsIndex.chunkMapping[centroidID] {
+		for _, hits := range centroidIDsPerQuery {
+			for _, hit := range hits {
+				for _, chunk := range statsIndex.chunkMapping[hit.centroidID] {
 					if _, ok := sealedRowCount[chunk.SegmentID]; ok {
 						targetSegments[chunk.SegmentID] = struct{}{}
 					}

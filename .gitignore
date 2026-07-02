@@ -137,5 +137,5 @@ docs/superpowers/
 # agent context
 .context/
 
-# local global index notes
-CLUSTERING_COMPACTION_FLOW.md
+
+*.md

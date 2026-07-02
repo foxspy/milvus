@@ -145,6 +145,22 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return enable_expr_cache_;
     }
 
+    // Per-call global index head-index search hints (graph-search seeds), injected
+    // into the per-call QueryContext's search_info so concurrent per-segment searches
+    // never share the plan's search_info.
+    void
+    SetSearchHints(std::vector<knowhere::SearchHint> search_hints) {
+        search_hints_ = std::move(search_hints);
+    }
+
+    // Per-call worker-batched global index seeds: per-query graph-search hints for
+    // this segment (outer index = query row). Injected into the per-call query_context.
+    void
+    SetSearchHintsPerQuery(
+        std::vector<std::vector<knowhere::SearchHint>> search_hints_per_query) {
+        search_hints_per_query_ = std::move(search_hints_per_query);
+    }
+
     static RowVectorPtr
     ExecuteTask(plan::PlanFragment& plan,
                 std::shared_ptr<milvus::exec::QueryContext> query_context);
@@ -173,6 +189,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     bool expr_use_pk_index_ = false;
     bool filter_only_ = false;
     bool enable_expr_cache_ = false;
+    std::vector<knowhere::SearchHint> search_hints_;
+    std::vector<std::vector<knowhere::SearchHint>> search_hints_per_query_;
 };
 
 // for test use only

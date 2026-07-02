@@ -2284,14 +2284,22 @@ func normalizePositionTimestamp(pos *msgpb.MsgPosition, commitTs uint64) *msgpb.
 	}
 }
 
-func validateCompactionFallbackStartPosition(compactFromSegInfos []*SegmentInfo, fallbackStart *msgpb.MsgPosition) error {
-	if fallbackStart == nil {
-		return nil
-	}
+// maxInputCommitTimestamp returns the largest commit_ts among the compaction input
+// segments. Import segments carry a non-zero commit_ts (the moment the bulk import was
+// committed); streaming-inserted segments have 0.
+func maxInputCommitTimestamp(compactFromSegInfos []*SegmentInfo) uint64 {
 	var maxCommitTs uint64
 	for _, info := range compactFromSegInfos {
 		maxCommitTs = max(maxCommitTs, info.GetCommitTimestamp())
 	}
+	return maxCommitTs
+}
+
+func validateCompactionFallbackStartPosition(compactFromSegInfos []*SegmentInfo, fallbackStart *msgpb.MsgPosition) error {
+	if fallbackStart == nil {
+		return nil
+	}
+	maxCommitTs := maxInputCommitTimestamp(compactFromSegInfos)
 	if maxCommitTs == 0 || fallbackStart.GetTimestamp() >= maxCommitTs {
 		return nil
 	}
@@ -2386,6 +2394,21 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetStartPosition()
 	}))
+	// Import segments carry a commit_ts later than their start position (by the whole
+	// import duration). The compacted output rows are already stamped with commit_ts, so
+	// the fallback start position must not be earlier than the max input commit_ts, else
+	// the output could be exposed before the import committed. Clamp the fallback up to
+	// that floor (no-op for non-import inputs whose commit_ts is 0) instead of failing the
+	// compaction outright, which would leave the produced output segments orphaned.
+	if maxCommitTs := maxInputCommitTimestamp(compactFromSegInfos); maxCommitTs != 0 &&
+		fallbackStart != nil && fallbackStart.GetTimestamp() < maxCommitTs {
+		fallbackStart = &msgpb.MsgPosition{
+			ChannelName: fallbackStart.GetChannelName(),
+			MsgID:       fallbackStart.GetMsgID(),
+			MsgGroup:    fallbackStart.GetMsgGroup(),
+			Timestamp:   maxCommitTs,
+		}
+	}
 	if err := validateCompactionFallbackStartPosition(compactFromSegInfos, fallbackStart); err != nil {
 		return nil, nil, err
 	}
@@ -2521,6 +2544,21 @@ func (m *meta) completeMixCompactionMutation(
 	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetStartPosition()
 	}))
+	// Import segments carry a commit_ts later than their start position (by the whole
+	// import duration). The compacted output rows are already stamped with commit_ts, so
+	// the fallback start position must not be earlier than the max input commit_ts, else
+	// the output could be exposed before the import committed. Clamp the fallback up to
+	// that floor (no-op for non-import inputs whose commit_ts is 0) instead of failing the
+	// compaction outright, which would leave the produced output segments orphaned.
+	if maxCommitTs := maxInputCommitTimestamp(compactFromSegInfos); maxCommitTs != 0 &&
+		fallbackStart != nil && fallbackStart.GetTimestamp() < maxCommitTs {
+		fallbackStart = &msgpb.MsgPosition{
+			ChannelName: fallbackStart.GetChannelName(),
+			MsgID:       fallbackStart.GetMsgID(),
+			MsgGroup:    fallbackStart.GetMsgGroup(),
+			Timestamp:   maxCommitTs,
+		}
+	}
 	if err := validateCompactionFallbackStartPosition(compactFromSegInfos, fallbackStart); err != nil {
 		return nil, nil, err
 	}

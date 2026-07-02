@@ -30,6 +30,8 @@
 #include "common/Exception.h"
 #include "common/ArrayOffsets.h"
 #include "common/OpContext.h"
+#include "common/QueryInfo.h"
+#include "knowhere/comp/search_hint.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 
@@ -270,6 +272,20 @@ class QueryContext : public Context {
     void
     set_search_info(const milvus::SearchInfo& search_info) {
         search_info_ = search_info;
+    }
+
+    // Per-call global index head-index search hints. Injected into the (per-call,
+    // already-copied) search_info_ so concurrent per-segment searches never share
+    // the plan's search_info.
+    void
+    set_search_hints(std::vector<knowhere::SearchHint> search_hints) {
+        search_info_.search_hints_ = std::move(search_hints);
+    }
+
+    void
+    set_search_hints_per_query(
+        std::vector<std::vector<knowhere::SearchHint>> search_hints_per_query) {
+        search_info_.search_hints_per_query_ = std::move(search_hints_per_query);
     }
 
     void

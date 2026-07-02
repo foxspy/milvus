@@ -181,7 +181,17 @@ AsyncSearch(CTraceContext c_trace,
             uint64_t collection_ttl,
             uint64_t entity_ttl_physical_time_us,
             bool filter_only,
-            bool enable_expr_cache);
+            bool enable_expr_cache,
+            const int64_t* hint_offsets,
+            const int64_t* hint_ranges,
+            const float* hint_distances,
+            int64_t hint_count,
+            // Worker-batched per-query seeds: for pq_num queries that carry hints on
+            // this segment, pq_query_indices[a] is the query row and pq_hint_counts[a]
+            // is how many of the flat hint_* entries (consumed in order) belong to it.
+            const int64_t* pq_query_indices,
+            const int64_t* pq_hint_counts,
+            int64_t pq_num);
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);

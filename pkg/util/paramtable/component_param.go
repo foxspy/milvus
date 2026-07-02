@@ -3688,6 +3688,8 @@ type queryNodeConfig struct {
 	EnableSegmentPrune                      ParamItem `refreshable:"true"`
 	GlobalIndexSearchNprobe                 ParamItem `refreshable:"true"`
 	GlobalIndexSearchEnabled                ParamItem `refreshable:"true"`
+	GlobalIndexSearchEntryPoints            ParamItem `refreshable:"true"`
+	GlobalIndexSearchBatchByWorker          ParamItem `refreshable:"true"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"true"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
@@ -4999,6 +5001,30 @@ user-task-polling:
 		Export: true,
 	}
 	p.GlobalIndexSearchEnabled.Init(base.mgr)
+	p.GlobalIndexSearchEntryPoints = ParamItem{
+		Key:          "queryNode.globalIndex.search.entryPoints",
+		Version:      "2.7.0",
+		DefaultValue: "true",
+		Doc: "When the per-query head-index search path is enabled, also pass head-index search " +
+			"hints (matched centroid local row range + distance) as graph-search entry points to " +
+			"the segment index. Set false to keep the same per-query segment pruning but use the " +
+			"index's default entry point (for isolating the entry-points contribution to recall).",
+		Export: true,
+	}
+	p.GlobalIndexSearchEntryPoints.Init(base.mgr)
+	p.GlobalIndexSearchBatchByWorker = ParamItem{
+		Key:          "queryNode.globalIndex.search.batchByWorker",
+		Version:      "2.7.0",
+		DefaultValue: "false",
+		Doc: "When the global index search path is enabled, batch the per-query sub-searches " +
+			"by target worker instead of splitting into nq independent nq=1 RPCs. One RPC per " +
+			"worker carries the queries whose target segments live on it, marking per segment " +
+			"which queries search it (segment x query), so the delegator->querynode RPC count " +
+			"collapses from ~nq*workers to O(hit workers). Requires segcore per-segment query " +
+			"subset support; falls back to the per-query path when disabled or inapplicable.",
+		Export: true,
+	}
+	p.GlobalIndexSearchBatchByWorker.Init(base.mgr)
 	p.DefaultSegmentFilterRatio = ParamItem{
 		Key:          "queryNode.defaultSegmentFilterRatio",
 		Version:      "2.4.0",
@@ -5224,15 +5250,9 @@ type dataCoordConfig struct {
 	ClusteringCompactionMaxClusterSizeRatio      ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxClusterSize           ParamItem `refreshable:"true"`
 	ClusteringCompactionGlobalIndexEnable        ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalTrainMethod        ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalAssignMethod       ParamItem `refreshable:"true"`
 	ClusteringCompactionGlobalCompactionMaxRows  ParamItem `refreshable:"true"`
 	ClusteringCompactionGlobalCompactionMinRows  ParamItem `refreshable:"true"`
 	ClusteringCompactionGlobalNumRowsPerCentroid ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalKmeansMaxIter      ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalKmeansRandomState  ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalKmeansFastMode     ParamItem `refreshable:"true"`
-	ClusteringCompactionGlobalKmeansFastEpsilon  ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
@@ -6092,24 +6112,6 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.ClusteringCompactionGlobalIndexEnable.Init(base.mgr)
 
-	p.ClusteringCompactionGlobalTrainMethod = ParamItem{
-		Key:          "dataCoord.compaction.clustering.globalIndex.trainMethod",
-		Version:      "2.7.0",
-		DefaultValue: "index",
-		Doc:          "Cardinal global index train method for AnalyzeV2",
-		Export:       true,
-	}
-	p.ClusteringCompactionGlobalTrainMethod.Init(base.mgr)
-
-	p.ClusteringCompactionGlobalAssignMethod = ParamItem{
-		Key:          "dataCoord.compaction.clustering.globalIndex.assignMethod",
-		Version:      "2.7.0",
-		DefaultValue: "index",
-		Doc:          "Cardinal global index assign method for AnalyzeV2",
-		Export:       true,
-	}
-	p.ClusteringCompactionGlobalAssignMethod.Init(base.mgr)
-
 	p.ClusteringCompactionGlobalCompactionMaxRows = ParamItem{
 		Key:          "dataCoord.compaction.clustering.globalIndex.compactionMaxRows",
 		Version:      "2.7.0",
@@ -6136,42 +6138,6 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.ClusteringCompactionGlobalNumRowsPerCentroid.Init(base.mgr)
-
-	p.ClusteringCompactionGlobalKmeansMaxIter = ParamItem{
-		Key:          "dataCoord.compaction.clustering.globalIndex.kmeansMaxIter",
-		Version:      "2.7.0",
-		DefaultValue: "10",
-		Doc:          "Max kmeans iterations for AnalyzeV2 Cardinal clustering",
-		Export:       true,
-	}
-	p.ClusteringCompactionGlobalKmeansMaxIter.Init(base.mgr)
-
-	p.ClusteringCompactionGlobalKmeansRandomState = ParamItem{
-		Key:          "dataCoord.compaction.clustering.globalIndex.kmeansRandomState",
-		Version:      "2.7.0",
-		DefaultValue: "0",
-		Doc:          "Random state for AnalyzeV2 Cardinal clustering",
-		Export:       true,
-	}
-	p.ClusteringCompactionGlobalKmeansRandomState.Init(base.mgr)
-
-	p.ClusteringCompactionGlobalKmeansFastMode = ParamItem{
-		Key:          "dataCoord.compaction.clustering.globalIndex.kmeansFastMode",
-		Version:      "2.7.0",
-		DefaultValue: "0",
-		Doc:          "Cardinal kmeansfast mode for AnalyzeV2",
-		Export:       true,
-	}
-	p.ClusteringCompactionGlobalKmeansFastMode.Init(base.mgr)
-
-	p.ClusteringCompactionGlobalKmeansFastEpsilon = ParamItem{
-		Key:          "dataCoord.compaction.clustering.globalIndex.kmeansFastEpsilon",
-		Version:      "2.7.0",
-		DefaultValue: "1.5",
-		Doc:          "Cardinal kmeansfast epsilon for AnalyzeV2",
-		Export:       true,
-	}
-	p.ClusteringCompactionGlobalKmeansFastEpsilon.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",

@@ -246,6 +246,13 @@ func (w *MultiSegmentWriter) GetCompactionSegments() []*datapb.CompactionSegment
 	return w.res
 }
 
+// CurrentSegmentID returns the output segment id that the most recently written
+// value landed in. Callers must query it while holding their own write lock,
+// right after WriteValue, to attribute a row to its output segment.
+func (w *MultiSegmentWriter) CurrentSegmentID() typeutil.UniqueID {
+	return w.currentSegmentID
+}
+
 func (w *MultiSegmentWriter) Write(r storage.Record) error {
 	if err := w.rotateWriterOrGrowCurrent(); err != nil {
 		return err

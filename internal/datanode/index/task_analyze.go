@@ -215,8 +215,8 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		analyzeInfo.HeadIndexPath = statsPaths.HeadIndex
 		analyzeInfo.ChunkMappingPath = statsPaths.ChunkMapping
 		analyzeInfo.CompactionPlanPath = analyzePaths.CompactionPrePlan
-		analyzeInfo.GlobalTrainMethod = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalTrainMethod.GetValue()
-		analyzeInfo.GlobalAssignMethod = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalAssignMethod.GetValue()
+		// knowhere.cluster.* pass-through; cardinal applies defaults for absent keys.
+		analyzeInfo.ClusterParams = paramtable.Get().KnowhereConfig.GetClusterParams()
 		analyzeInfo.CompactionMaxRows = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalCompactionMaxRows.GetAsInt64()
 		if analyzeInfo.CompactionMaxRows <= 0 && analyzeInfo.GetDim() > 0 {
 			vectorSize := typeutil.VectorTypeSize(analyzeInfo.GetFieldSchema().GetDataType())
@@ -227,10 +227,6 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 			}
 		}
 		analyzeInfo.CompactionMinRows = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalCompactionMinRows.GetAsInt64()
-		analyzeInfo.KmeansMaxIter = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalKmeansMaxIter.GetAsInt64()
-		analyzeInfo.KmeansRandomState = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalKmeansRandomState.GetAsInt64()
-		analyzeInfo.KmeansFastMode = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalKmeansFastMode.GetAsInt64()
-		analyzeInfo.KmeansFastEpsilon = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalKmeansFastEpsilon.GetAsFloat()
 	}
 
 	runner := at.selectAnalyzeRunner()

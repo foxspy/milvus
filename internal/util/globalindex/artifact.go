@@ -44,35 +44,6 @@ type Chunk struct {
 
 type ChunkMapping map[int64][]Chunk
 
-func BuildChunkMappingFromSortedCentroids(segmentID int64, centroidIDs []int64) ChunkMapping {
-	mapping := make(ChunkMapping)
-	if len(centroidIDs) == 0 {
-		return mapping
-	}
-
-	startOffset := int64(0)
-	currentCentroidID := centroidIDs[0]
-	for offset := int64(1); offset < int64(len(centroidIDs)); offset++ {
-		centroidID := centroidIDs[offset]
-		if centroidID == currentCentroidID {
-			continue
-		}
-		mapping[currentCentroidID] = append(mapping[currentCentroidID], Chunk{
-			SegmentID: segmentID,
-			Offset:    startOffset,
-			Size:      offset - startOffset,
-		})
-		startOffset = offset
-		currentCentroidID = centroidID
-	}
-	mapping[currentCentroidID] = append(mapping[currentCentroidID], Chunk{
-		SegmentID: segmentID,
-		Offset:    startOffset,
-		Size:      int64(len(centroidIDs)) - startOffset,
-	})
-	return mapping
-}
-
 func BuildStatsIndexPaths(rootPath string, collectionID, partitionID int64, vchannel string, version int64) StatsIndexPaths {
 	if strings.Contains(vchannel, "/") {
 		panic(fmt.Sprintf("vchannel must not contain slash: %s", vchannel))
