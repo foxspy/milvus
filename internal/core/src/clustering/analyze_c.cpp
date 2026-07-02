@@ -292,14 +292,16 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                    "was null");
         auto real_analyze = reinterpret_cast<AnalyzeHandle*>(analyze);
         auto res = real_analyze->GetResultMeta();
-        *centroid_path = res.centroid_path.data();
+        // res is a local copy; hand out strdup'd strings (freed by the Go
+        // caller) instead of pointers into res, which dangle after return.
+        *centroid_path = strdup(res.centroid_path.c_str());
         *centroid_file_size = res.centroid_file_size;
 
         auto& map_ = res.id_mappings;
         const char** id_mapping_paths_ = (const char**)id_mapping_paths;
         size_t i = 0;
         for (auto it = map_.begin(); it != map_.end(); ++it, i++) {
-            id_mapping_paths_[i] = it->first.data();
+            id_mapping_paths_[i] = strdup(it->first.c_str());
             id_mapping_sizes[i] = it->second;
         }
         status.error_code = Success;

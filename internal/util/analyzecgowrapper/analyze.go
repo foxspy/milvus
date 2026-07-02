@@ -118,9 +118,9 @@ func (ca *CgoAnalyze) Delete() error {
 func (ca *CgoAnalyze) GetResult(size int) (string, int64, []string, []int64, error) {
 	cOffsetMappingFilesPath := make([]unsafe.Pointer, size)
 	cOffsetMappingFilesSize := make([]C.int64_t, size)
-	cCentroidsFilePath := C.CString("")
+	// filled by C with strdup'd strings; freed below after copying to Go
+	var cCentroidsFilePath *C.char
 	cCentroidsFileSize := C.int64_t(0)
-	defer C.free(unsafe.Pointer(cCentroidsFilePath))
 
 	status := C.GetAnalyzeResultMeta(ca.analyzePtr,
 		&cCentroidsFilePath,
@@ -128,9 +128,10 @@ func (ca *CgoAnalyze) GetResult(size int) (string, int64, []string, []int64, err
 		unsafe.Pointer(&cOffsetMappingFilesPath[0]),
 		&cOffsetMappingFilesSize[0],
 	)
-	if err := HandleCStatus(&status, "failed to delete analyze"); err != nil {
+	if err := HandleCStatus(&status, "failed to get analyze result meta"); err != nil {
 		return "", 0, nil, nil, err
 	}
+	defer C.free(unsafe.Pointer(cCentroidsFilePath))
 	offsetMappingFilesPath := make([]string, size)
 	offsetMappingFilesSize := make([]int64, size)
 	centroidsFilePath := C.GoString(cCentroidsFilePath)
@@ -139,6 +140,7 @@ func (ca *CgoAnalyze) GetResult(size int) (string, int64, []string, []int64, err
 	for i := 0; i < size; i++ {
 		offsetMappingFilesPath[i] = C.GoString((*C.char)(cOffsetMappingFilesPath[i]))
 		offsetMappingFilesSize[i] = int64(cOffsetMappingFilesSize[i])
+		C.free(cOffsetMappingFilesPath[i])
 	}
 
 	return centroidsFilePath, centroidsFileSize, offsetMappingFilesPath, offsetMappingFilesSize, nil
