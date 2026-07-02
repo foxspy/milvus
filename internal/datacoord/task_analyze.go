@@ -247,6 +247,21 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
 	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 	req.TaskSlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
+	if task.GetEnableGlobalIndex() {
+		// Resolve compaction group row bounds here so instance-level config applies;
+		// index pool workers run with their own paramtable and must not decide this.
+		maxRows := Params.DataCoordCfg.ClusteringCompactionGlobalCompactionMaxRows.GetAsInt64()
+		if maxRows <= 0 && req.GetDim() > 0 {
+			vectorSize := typeutil.VectorTypeSize(task.FieldType)
+			if vectorSize > 0 {
+				maxBytes := Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 *
+					Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat()
+				maxRows = int64(maxBytes / float64(vectorSize) / float64(req.GetDim()))
+			}
+		}
+		req.CompactionMaxRows = maxRows
+		req.CompactionMinRows = Params.DataCoordCfg.ClusteringCompactionGlobalCompactionMinRows.GetAsInt64()
+	}
 
 	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 

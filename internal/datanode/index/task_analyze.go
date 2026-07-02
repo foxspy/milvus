@@ -217,7 +217,12 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		analyzeInfo.CompactionPlanPath = analyzePaths.CompactionPrePlan
 		// knowhere.cluster.* pass-through; knowhere applies defaults for absent keys.
 		analyzeInfo.ClusterParams = paramtable.Get().KnowhereConfig.GetClusterParams()
-		analyzeInfo.CompactionMaxRows = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalCompactionMaxRows.GetAsInt64()
+		// Prefer bounds resolved on datacoord (instance-visible config); the local
+		// paramtable fallback only covers older coordinators that do not send them.
+		analyzeInfo.CompactionMaxRows = at.req.GetCompactionMaxRows()
+		if analyzeInfo.CompactionMaxRows <= 0 {
+			analyzeInfo.CompactionMaxRows = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalCompactionMaxRows.GetAsInt64()
+		}
 		if analyzeInfo.CompactionMaxRows <= 0 && analyzeInfo.GetDim() > 0 {
 			vectorSize := typeutil.VectorTypeSize(analyzeInfo.GetFieldSchema().GetDataType())
 			if vectorSize > 0 {
@@ -226,7 +231,10 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 				analyzeInfo.CompactionMaxRows = int64(maxBytes / float64(vectorSize) / float64(analyzeInfo.GetDim()))
 			}
 		}
-		analyzeInfo.CompactionMinRows = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalCompactionMinRows.GetAsInt64()
+		analyzeInfo.CompactionMinRows = at.req.GetCompactionMinRows()
+		if analyzeInfo.CompactionMinRows <= 0 {
+			analyzeInfo.CompactionMinRows = paramtable.Get().DataCoordCfg.ClusteringCompactionGlobalCompactionMinRows.GetAsInt64()
+		}
 	}
 
 	runner := at.selectAnalyzeRunner()

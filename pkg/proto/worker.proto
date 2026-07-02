@@ -173,6 +173,10 @@ message AnalyzeRequest {
   bool enable_global_index = 20;
   string insert_channel = 21;
   map<int64, AnalyzeSegmentStorageInfo> segment_storage_infos = 22;
+  // Target max/min rows per AnalyzeV2 compaction group, resolved on datacoord
+  // (instance-visible config). Worker-side paramtable is only a fallback when zero.
+  int64 compaction_max_rows = 23;
+  int64 compaction_min_rows = 24;
 }
 
 message AnalyzeSegmentStorageInfo {
