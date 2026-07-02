@@ -3690,6 +3690,7 @@ type queryNodeConfig struct {
 	GlobalIndexSearchEnabled                ParamItem `refreshable:"true"`
 	GlobalIndexSearchEntryPoints            ParamItem `refreshable:"true"`
 	GlobalIndexSearchBatchByWorker          ParamItem `refreshable:"true"`
+	GlobalIndexSearchHeadEf                 ParamItem `refreshable:"true"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"true"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
@@ -5025,6 +5026,16 @@ user-task-polling:
 		Export: true,
 	}
 	p.GlobalIndexSearchBatchByWorker.Init(base.mgr)
+	p.GlobalIndexSearchHeadEf = ParamItem{
+		Key:          "queryNode.globalIndex.search.headEf",
+		Version:      "2.7.0",
+		DefaultValue: "0",
+		Doc: "Search candidates (ef) used when probing the global head index on the shard " +
+			"delegator. 0 keeps the engine default. Set explicitly to decouple head-index " +
+			"probing quality from the engine's internal heuristics.",
+		Export: true,
+	}
+	p.GlobalIndexSearchHeadEf.Init(base.mgr)
 	p.DefaultSegmentFilterRatio = ParamItem{
 		Key:          "queryNode.defaultSegmentFilterRatio",
 		Version:      "2.4.0",

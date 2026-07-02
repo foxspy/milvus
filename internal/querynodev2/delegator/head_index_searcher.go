@@ -140,12 +140,15 @@ func (s *headIndexSearcherImpl) Search(ctx context.Context, req *internalpb.Sear
 	nq := int64(len(vectors)) / dim
 	ids := make([]int64, nq*topK)
 	distances := make([]float32, nq*topK)
+	// 0 keeps the engine-default ef; a positive value pins head-index probing quality.
+	headEf := paramtable.Get().QueryNodeCfg.GlobalIndexSearchHeadEf.GetAsInt64()
 	status := C.SearchHeadIndex(
 		s.ptr,
 		(*C.float)(unsafe.Pointer(&vectors[0])),
 		C.int64_t(nq),
 		C.int64_t(dim),
 		C.int64_t(topK),
+		C.int64_t(headEf),
 		(*C.int64_t)(unsafe.Pointer(&ids[0])),
 		(*C.float)(unsafe.Pointer(&distances[0])),
 	)

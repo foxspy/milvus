@@ -139,6 +139,7 @@ SearchHeadIndex(CHeadIndex index,
                         int64_t nq,
                         int64_t dim,
                         int64_t topk,
+                        int64_t ef,
                         int64_t* ids,
                         float* distances);
 

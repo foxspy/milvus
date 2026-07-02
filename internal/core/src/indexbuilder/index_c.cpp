@@ -123,7 +123,7 @@ struct HeadIndexHandle {
 };
 
 knowhere::Json
-BuildHeadIndexKnowhereConfig(int64_t dim, int64_t topk) {
+BuildHeadIndexKnowhereConfig(int64_t dim, int64_t topk, int64_t ef = 0) {
     knowhere::Json config;
     config[knowhere::meta::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
     config[knowhere::meta::METRIC_TYPE] = knowhere::metric::L2;
@@ -131,6 +131,10 @@ BuildHeadIndexKnowhereConfig(int64_t dim, int64_t topk) {
     config[knowhere::meta::TOPK] = topk;
     config[knowhere::meta::INDEX_PREFIX] = "global_head_index";
     config[knowhere::meta::INDEX_ENGINE_VERSION] = 9;
+    if (ef > 0) {
+        // pin probing quality; engine default applies when unset
+        config["ef"] = std::max(ef, topk);
+    }
     return config;
 }
 
@@ -1263,6 +1267,7 @@ SearchHeadIndex(CHeadIndex index,
                         int64_t nq,
                         int64_t dim,
                         int64_t topk,
+                        int64_t ef,
                         int64_t* ids,
                         float* distances) {
     SCOPE_CGO_CALL_METRIC();
@@ -1282,7 +1287,7 @@ SearchHeadIndex(CHeadIndex index,
         auto dataset = knowhere::GenDataSet(nq, dim, query);
         auto result =
             handle->index.Search(dataset,
-                                 BuildHeadIndexKnowhereConfig(dim, topk),
+                                 BuildHeadIndexKnowhereConfig(dim, topk, ef),
                                  knowhere::BitsetView(nullptr));
         AssertInfo(
             result.has_value(),
