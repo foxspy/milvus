@@ -130,11 +130,7 @@ BuildHeadIndexKnowhereConfig(int64_t dim, int64_t topk, int64_t ef = 0) {
     config[knowhere::meta::DIM] = dim;
     config[knowhere::meta::TOPK] = topk;
     config[knowhere::meta::INDEX_PREFIX] = "global_head_index";
-    config[knowhere::meta::INDEX_ENGINE_VERSION] = 9;
-    if (ef > 0) {
-        // pin probing quality; engine default applies when unset
-        config["ef"] = std::max(ef, topk);
-    }
+    config[knowhere::meta::INDEX_ENGINE_VERSION] = 10;
     return config;
 }
 
