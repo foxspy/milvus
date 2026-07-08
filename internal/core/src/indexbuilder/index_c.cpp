@@ -105,6 +105,7 @@ class GlobalHeadIndexFileManager : public milvus::FileManager {
             std::make_shared<milvus::storage::RemoteInputStream>(
                 std::move(remote_file.ValueOrDie())));
     }
+    
 
     std::shared_ptr<milvus::OutputStream>
     OpenOutputStream(const std::string&) override {
