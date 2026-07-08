@@ -130,9 +130,11 @@ func newGlobalIndexSpiller(t *clusteringCompactionTask) *globalIndexSpiller {
 	spillStorage := proto.Clone(t.compactionParams.StorageConfig).(*indexpb.StorageConfig)
 	spillStorage.RootPath = root
 
-	// Bound Phase 1 memory: split the compaction memory budget across concurrent
+	// Bound Phase 1 memory: split the compaction memory budget across concurrent spill
 	// mappers, then convert bytes to a row count using the estimated in-memory row size.
-	poolSize := int64(t.getWorkerPoolSize())
+	// Use the spill pool size (not the merge pool) so total spill memory stays bounded at
+	// ~0.7*memoryLimit even when spill concurrency is raised above workPoolSize.
+	poolSize := int64(t.getSpillPoolSize())
 	if poolSize < 1 {
 		poolSize = 1
 	}
@@ -201,7 +203,7 @@ func (t *clusteringCompactionTask) mappingGlobalIndexSorted(ctx context.Context,
 			StorageVersion: segment.StorageVersion,
 			Manifest:       segment.GetManifest(),
 		}
-		future := t.mappingPool.Submit(func() (any, error) {
+		future := t.spillPool.Submit(func() (any, error) {
 			return struct{}{}, t.spillSegment(ctx, spiller, segmentClone)
 		})
 		futures = append(futures, future)

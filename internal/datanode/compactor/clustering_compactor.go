@@ -74,6 +74,10 @@ type clusteringCompactionTask struct {
 	tr          *timerecord.TimeRecorder
 	mappingPool *conc.Pool[any]
 	flushPool   *conc.Pool[any]
+	// spillPool runs the global-index Phase-1 spill (per input segment). It is decoupled
+	// from mappingPool so spill concurrency can be raised without changing Phase-2 merge
+	// concurrency. Falls back to mappingPool sizing when spillPoolSize is unset.
+	spillPool *conc.Pool[any]
 
 	plan *datapb.CompactionPlan
 
@@ -263,7 +267,9 @@ func (t *clusteringCompactionTask) init() error {
 	workerPoolSize := t.getWorkerPoolSize()
 	t.mappingPool = conc.NewPool[any](workerPoolSize)
 	t.flushPool = conc.NewPool[any](workerPoolSize)
-	log.Info("clustering compaction task initialed", zap.Int64("memory_buffer_size", t.memoryLimit), zap.Int("worker_pool_size", workerPoolSize))
+	spillPoolSize := t.getSpillPoolSize()
+	t.spillPool = conc.NewPool[any](spillPoolSize)
+	log.Info("clustering compaction task initialed", zap.Int64("memory_buffer_size", t.memoryLimit), zap.Int("worker_pool_size", workerPoolSize), zap.Int("spill_pool_size", spillPoolSize))
 	return nil
 }
 
@@ -901,6 +907,17 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 func (t *clusteringCompactionTask) getWorkerPoolSize() int {
 	return int(math.Max(float64(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.GetAsInt()), 1.0))
+}
+
+// getSpillPoolSize returns the concurrency for the global-index Phase-1 spill. It is
+// separate from getWorkerPoolSize (Phase-2 merge) so spill can be parallelized further
+// without inflating merge memory. A value <= 0 falls back to the worker pool size.
+func (t *clusteringCompactionTask) getSpillPoolSize() int {
+	spill := paramtable.Get().DataNodeCfg.ClusteringCompactionSpillPoolSize.GetAsInt()
+	if spill <= 0 {
+		return t.getWorkerPoolSize()
+	}
+	return spill
 }
 
 // getMemoryLimit returns the maximum memory that a clustering compaction task is allowed to use

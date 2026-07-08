@@ -6985,6 +6985,7 @@ type dataNodeConfig struct {
 	// clustering compaction
 	ClusteringCompactionMemoryBufferRatio ParamItem `refreshable:"true"`
 	ClusteringCompactionWorkerPoolSize    ParamItem `refreshable:"true"`
+	ClusteringCompactionSpillPoolSize     ParamItem `refreshable:"true"`
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
@@ -7453,6 +7454,22 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.ClusteringCompactionWorkerPoolSize.Init(base.mgr)
+
+	p.ClusteringCompactionSpillPoolSize = ParamItem{
+		Key:     "dataNode.clusteringCompaction.spillPoolSize",
+		Version: "2.4.6",
+		Doc: "Concurrency of the global-index sorted-layout spill (Phase 1) only. " +
+			"0 falls back to workPoolSize. Raising it speeds up spill (it reads/sorts more " +
+			"input segments in parallel) while keeping merge (Phase 2) at workPoolSize. " +
+			"Note: spill total memory stays bounded at ~0.7*memoryBuffer regardless of this " +
+			"value, but setting it much larger than workPoolSize shrinks each sub-run, which " +
+			"increases the number of runs and therefore Phase-2 merge memory; keep it small " +
+			"enough that a sub-run budget still exceeds one input segment's rows.",
+		DefaultValue: "0",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ClusteringCompactionSpillPoolSize.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
 		Key:          "dataNode.bloomFilterApplyParallelFactor",
