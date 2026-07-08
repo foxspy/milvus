@@ -223,7 +223,10 @@ func (t *clusteringCompactionTask) mappingGlobalIndexSorted(ctx context.Context,
 		local := make(globalindex.ChunkMapping)
 		groupMappings[groupID] = local
 		mergeFutures = append(mergeFutures, t.mappingPool.Submit(func() (any, error) {
-			return struct{}{}, t.mergeGroup(ctx, spiller, groupID, buffer, local)
+			// mergeGroupWithRetry closes the group's writer itself so a transient S3
+			// upload failure (e.g. CRC64NVME BadDigest on UploadPart) can be retried by
+			// re-merging just this group from its still-present spill runs.
+			return struct{}{}, t.mergeGroupWithRetry(ctx, spiller, groupID, buffer, local)
 		}))
 	}
 	if err := conc.AwaitAll(mergeFutures...); err != nil {
@@ -236,9 +239,8 @@ func (t *clusteringCompactionTask) mappingGlobalIndexSorted(ctx context.Context,
 		}
 	}
 
-	if err := t.flushAll(); err != nil {
-		return nil, nil, err
-	}
+	// Note: each group's writer is already closed inside mergeGroupWithRetry, so the
+	// generic flushAll() is intentionally not called here.
 	if err := t.uploadSortedChunkMapping(ctx, mapping); err != nil {
 		return nil, nil, err
 	}
@@ -509,6 +511,53 @@ func (t *clusteringCompactionTask) mergeGroup(ctx context.Context, spiller *glob
 	}
 	tracker.finish()
 	return nil
+}
+
+// globalIndexMergeMaxAttempts bounds how many times a single group's merge+upload is
+// retried on a transient failure (e.g. an S3 UploadPart CRC64NVME BadDigest). One bad
+// part otherwise fails the whole multi-hour rewrite, which is not auto-retried.
+const globalIndexMergeMaxAttempts = 3
+
+// mergeGroupWithRetry merges one group and closes its writer, retrying the whole group on
+// a transient error. Because the spill runs live on local disk until the very end of
+// Phase 2 (spiller.cleanup runs after all groups), a retry can re-read them; each retry
+// uses a fresh output writer (fresh segment ids) and a cleared per-group chunk mapping so
+// no partial output from a failed attempt leaks into the result.
+func (t *clusteringCompactionTask) mergeGroupWithRetry(ctx context.Context, spiller *globalIndexSpiller,
+	groupID int, buffer *ClusterBuffer, mapping globalindex.ChunkMapping,
+) error {
+	var lastErr error
+	for attempt := 0; attempt < globalIndexMergeMaxAttempts; attempt++ {
+		if attempt > 0 {
+			log.Ctx(ctx).Warn("retrying global-index group merge after transient error",
+				zap.Int64("planID", t.GetPlanID()), zap.Int("groupID", groupID),
+				zap.Int("attempt", attempt), zap.Error(lastErr))
+			// Fresh output writer (new pre-allocated segment ids) + reset this group's
+			// chunk mapping; the previous attempt's partial segments become orphan garbage
+			// on object storage and are reclaimed by GC.
+			alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
+			writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
+				t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+				t.partitionID, t.collectionID, t.plan.Channel, 100,
+				t.getWriterOpts()...,
+			)
+			if err != nil {
+				return err
+			}
+			buffer.resetWriter(writer)
+			clear(mapping)
+		}
+		if lastErr = t.mergeGroup(ctx, spiller, groupID, buffer, mapping); lastErr != nil {
+			continue
+		}
+		// Close finalizes the group's output segment(s) and uploads them; this is where a
+		// transient S3 checksum failure surfaces.
+		if lastErr = buffer.Close(); lastErr != nil {
+			continue
+		}
+		return nil
+	}
+	return lastErr
 }
 
 // rangeTracker writes the merged, sorted rows into a group's MultiSegmentWriter and

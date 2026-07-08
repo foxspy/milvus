@@ -150,6 +150,14 @@ func (b *ClusterBuffer) Close() error {
 	return b.writer.Close()
 }
 
+// resetWriter swaps in a fresh MultiSegmentWriter, used to retry a failed group merge
+// with new output segment ids. Any partial output from the previous writer is abandoned.
+func (b *ClusterBuffer) resetWriter(w *MultiSegmentWriter) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	b.writer = w
+}
+
 func (b *ClusterBuffer) GetCompactionSegments() []*datapb.CompactionSegment {
 	b.lock.RLock()
 	defer b.lock.RUnlock()
