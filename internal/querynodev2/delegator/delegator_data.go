@@ -1098,7 +1098,18 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	signal := sd.distribution.RemoveDistributions(sealed, growing)
 	// wait cleared signal
 	<-signal
-	sd.releaseGlobalStatsSegments(req.GetSegmentIDs()...)
+	// Only drop global-stats coverage for sealed segments that RemoveDistributions
+	// actually removed. A balance move loads the segment on the new node (which
+	// re-adds its coverage via loadGlobalStatsIndexes) before releasing the old
+	// copy; RemoveDistributions keeps the entry because the node no longer matches,
+	// so the segment is still live. Because releaseGlobalStatsSegments is keyed by
+	// segmentID (node-agnostic), releasing by the request segmentIDs would strip
+	// coverage for the still-live moved copy and force those segments into the
+	// passthrough (full-scan) path, defeating global-index pruning.
+	removedSegmentIDs := lo.Filter(req.GetSegmentIDs(), func(segmentID int64, _ int) bool {
+		return !sd.distribution.SealedSegmentExists(segmentID)
+	})
+	sd.releaseGlobalStatsSegments(removedSegmentIDs...)
 
 	if len(growing) > 0 {
 		sd.growingSegmentLock.Lock()
