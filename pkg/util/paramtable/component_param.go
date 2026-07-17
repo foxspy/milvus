@@ -72,6 +72,7 @@ type ComponentParam struct {
 	once      sync.Once
 	baseTable *BaseTable
 
+	
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
 	AutoIndexConfig AutoIndexConfig
