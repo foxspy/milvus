@@ -172,16 +172,21 @@ class VectorIndex : public IndexBase {
         search_cfg[knowhere::meta::METRIC_TYPE] = search_info.metric_type_;
         search_cfg[knowhere::meta::TOPK] = search_info.topk_;
 
-        // save trace context into search conf
-        if (search_info.trace_ctx_.traceID != nullptr &&
-            search_info.trace_ctx_.spanID != nullptr) {
-            search_cfg[knowhere::meta::TRACE_ID] =
-                tracer::GetTraceIDAsHexStr(&search_info.trace_ctx_);
-            search_cfg[knowhere::meta::SPAN_ID] =
-                tracer::GetSpanIDAsHexStr(&search_info.trace_ctx_);
-            search_cfg[knowhere::meta::TRACE_FLAGS] =
-                search_info.trace_ctx_.traceFlags;
-        }
+        // [TEST-ONLY] Do NOT inject per-query trace context into the search config.
+        // TRACE_ID/SPAN_ID/TRACE_FLAGS are unique per request, which makes the knowhere
+        // search-config cache key (full-JSON equality) miss on every query, defeating
+        // config reuse (CreateConfig+FormatAndCheck re-runs per query). Stripping them
+        // keeps the JSON stable so the cache actually hits. Trade-off: disables search
+        // tracing spans. Test-only; do not merge without excluding trace from the cache KEY instead.
+        // if (search_info.trace_ctx_.traceID != nullptr &&
+        //     search_info.trace_ctx_.spanID != nullptr) {
+        //     search_cfg[knowhere::meta::TRACE_ID] =
+        //         tracer::GetTraceIDAsHexStr(&search_info.trace_ctx_);
+        //     search_cfg[knowhere::meta::SPAN_ID] =
+        //         tracer::GetSpanIDAsHexStr(&search_info.trace_ctx_);
+        //     search_cfg[knowhere::meta::TRACE_FLAGS] =
+        //         search_info.trace_ctx_.traceFlags;
+        // }
 
         return search_cfg;
     }
