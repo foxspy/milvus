@@ -22,6 +22,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -229,6 +230,10 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
       // regardless of concurrent config-watcher stores to the atomic source.
       async_build_enabled_(
           segcore_config.get_enable_async_growing_index_build()),
+      async_finalize_budget_ms_(
+          segcore_config.get_async_growing_index_finalize_budget_ms()),
+      async_catchup_deadline_ms_(
+          segcore_config.get_async_growing_index_catchup_deadline_ms()),
       config_(std::make_unique<VecIndexConfig>(
           segment_max_row_count,
           field_index_meta,
@@ -956,8 +961,52 @@ void
 VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
     auto catchup_start = std::chrono::steady_clock::now();
     int64_t catchup_from = static_cast<int64_t>(index_cur_.load());
-    int64_t min_gap = std::numeric_limits<int64_t>::max();
-    int stall_rounds = 0;
+    int64_t consumed_rows = 0;
+    double consumed_ms = 0.0;
+
+    auto consume_rate = [&]() -> double {
+        return consumed_ms > 0.0
+                   ? static_cast<double>(consumed_rows) / consumed_ms
+                   : 0.0;
+    };
+    auto estimated_finalize_ms = [&](int64_t gap) -> double {
+        if (gap <= 0) {
+            return 0.0;
+        }
+        double rate = consume_rate();
+        return rate > 0.0 ? static_cast<double>(gap) / rate
+                          : std::numeric_limits<double>::infinity();
+    };
+    auto throw_deadline = [&](int64_t gap) {
+        double elapsed_ms = ElapsedMs(catchup_start);
+        double rate = consume_rate();
+        double estimate_ms = estimated_finalize_ms(gap);
+        LOG_WARN(
+            "async growing index catch-up deadline exceeded, discarding the "
+            "unpublished index and falling back to raw search permanently: "
+            "elapsed_ms={}, deadline_ms={}, gap_rows={}, consumed_rows={}, "
+            "consumed_ms={}, consume_rows_per_ms={}, "
+            "estimated_finalize_ms={}, finalize_budget_ms={}",
+            elapsed_ms,
+            async_catchup_deadline_ms_,
+            gap,
+            consumed_rows,
+            consumed_ms,
+            rate,
+            estimate_ms,
+            async_finalize_budget_ms_);
+        throw std::runtime_error(fmt::format(
+            "async growing index catch-up exceeded deadline: elapsed_ms={}, "
+            "deadline_ms={}, gap_rows={}, consume_rows_per_ms={}, "
+            "estimated_finalize_ms={}, finalize_budget_ms={}",
+            elapsed_ms,
+            async_catchup_deadline_ms_,
+            gap,
+            rate,
+            estimate_ms,
+            async_finalize_budget_ms_));
+    };
+
     for (;;) {
         if (IsCancelled()) {
             // Segment tearing down: stay kBuilding, never publish.
@@ -965,29 +1014,92 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
         }
         int64_t target = PhysicalTarget(field_raw_data, pending_upto_.load());
         int64_t gap = target - static_cast<int64_t>(index_cur_.load());
-        if (gap > 0 && stall_rounds < kMaxStallRounds) {
-            AddRange(field_raw_data, target, /*interruptible=*/true);
-            CallBuildHook(GrowingBuildPhase::kAfterCatchupRound);
-            // Stall = the gap stopped shrinking (the writer outpaces Add
-            // throughput). Compare against the best gap seen so far rather
-            // than only the previous round, so an oscillating gap still
-            // converges on the fallback. After kMaxStallRounds fall through to
-            // a forced locked finalize -- one long block, but the synchronous
-            // legacy path would block insert forever in this region.
-            stall_rounds = (gap >= min_gap) ? stall_rounds + 1 : 0;
-            min_gap = std::min(min_gap, gap);
-            continue;
+        if (gap > 0 && ElapsedMs(catchup_start) >= async_catchup_deadline_ms_ &&
+            estimated_finalize_ms(gap) > async_finalize_budget_ms_) {
+            throw_deadline(gap);
         }
+        if (gap > 0) {
+            auto round_start = std::chrono::steady_clock::now();
+            int64_t round_from = static_cast<int64_t>(index_cur_.load());
+            AddRange(field_raw_data, target, /*interruptible=*/true);
+            double round_ms = ElapsedMs(round_start);
+            int64_t round_rows =
+                static_cast<int64_t>(index_cur_.load()) - round_from;
+            if (round_rows > 0) {
+                consumed_rows += round_rows;
+                consumed_ms += round_ms;
+            }
+            CallBuildHook(GrowingBuildPhase::kAfterCatchupRound);
+
+            int64_t latest_target =
+                PhysicalTarget(field_raw_data, pending_upto_.load());
+            int64_t latest_gap =
+                latest_target - static_cast<int64_t>(index_cur_.load());
+            double rate = consume_rate();
+            double estimate_ms = estimated_finalize_ms(latest_gap);
+            LOG_INFO(
+                "async growing index catch-up round completed: "
+                "round_rows={}, round_ms={}, consumed_rows={}, "
+                "consumed_ms={}, consume_rows_per_ms={}, latest_gap_rows={}, "
+                "estimated_finalize_ms={}, finalize_budget_ms={}, "
+                "catchup_elapsed_ms={}, catchup_deadline_ms={}, decision={}",
+                round_rows,
+                round_ms,
+                consumed_rows,
+                consumed_ms,
+                rate,
+                latest_gap,
+                estimate_ms,
+                async_finalize_budget_ms_,
+                ElapsedMs(catchup_start),
+                async_catchup_deadline_ms_,
+                estimate_ms <= async_finalize_budget_ms_ ? "try_finalize"
+                                                         : "continue");
+
+            if (estimate_ms > async_finalize_budget_ms_) {
+                if (ElapsedMs(catchup_start) >= async_catchup_deadline_ms_) {
+                    throw_deadline(latest_gap);
+                }
+                continue;
+            }
+        }
+
         CallBuildHook(GrowingBuildPhase::kBeforeFinalize);
-        std::lock_guard<std::mutex> lock(append_mutex_);
+        auto lock_wait_start = std::chrono::steady_clock::now();
+        std::unique_lock<std::mutex> lock(append_mutex_);
+        double lock_wait_ms = ElapsedMs(lock_wait_start);
         if (IsCancelled()) {
             return;
         }
-        // Under append_mutex_ no insert can advance pending_upto_; the only
-        // rows to absorb are those that slipped in between our last read and
-        // the lock -- at most about one insert batch.
+        // Under append_mutex_ no insert can advance pending_upto_. Recompute
+        // the frozen gap because rows may have slipped in while the background
+        // task was competing for the lock. Never turn that race into an
+        // unbounded locked finalize.
         int64_t pending = pending_upto_.load();
         int64_t final_target = PhysicalTarget(field_raw_data, pending);
+        int64_t frozen_gap =
+            final_target - static_cast<int64_t>(index_cur_.load());
+        double frozen_estimate_ms = estimated_finalize_ms(frozen_gap);
+        if (frozen_estimate_ms > async_finalize_budget_ms_) {
+            LOG_INFO(
+                "async growing index finalize deferred after locking: "
+                "frozen_gap_rows={}, estimated_finalize_ms={}, "
+                "finalize_budget_ms={}, consume_rows_per_ms={}, "
+                "lock_wait_ms={}, catchup_elapsed_ms={}, decision=continue",
+                frozen_gap,
+                frozen_estimate_ms,
+                async_finalize_budget_ms_,
+                consume_rate(),
+                lock_wait_ms,
+                ElapsedMs(catchup_start));
+            lock.unlock();
+            if (ElapsedMs(catchup_start) >= async_catchup_deadline_ms_) {
+                throw_deadline(frozen_gap);
+            }
+            continue;
+        }
+
+        auto lock_hold_start = std::chrono::steady_clock::now();
         AddRange(field_raw_data, final_target, /*interruptible=*/false);
         // get_valid_data() materializes an O(rows) copy, so it is fetched once
         // here and never inside the catch-up loop.
@@ -1009,6 +1121,19 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
         // every row whose AppendingIndex call has returned.
         sync_with_index_.store(true);
         state_.store(GrowingIndexState::kSynced);
+        double lock_hold_ms = ElapsedMs(lock_hold_start);
+        LOG_INFO(
+            "async growing index finalized and published: frozen_gap_rows={}, "
+            "estimated_finalize_ms={}, finalize_budget_ms={}, "
+            "consume_rows_per_ms={}, lock_wait_ms={}, lock_hold_ms={}, "
+            "catchup_elapsed_ms={}, decision=publish",
+            frozen_gap,
+            frozen_estimate_ms,
+            async_finalize_budget_ms_,
+            consume_rate(),
+            lock_wait_ms,
+            lock_hold_ms,
+            ElapsedMs(catchup_start));
         milvus::monitor::internal_core_growing_index_catchup_latency.Observe(
             ElapsedMs(catchup_start));
         milvus::monitor::internal_core_growing_index_catchup_rows.Observe(

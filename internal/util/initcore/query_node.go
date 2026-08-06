@@ -277,11 +277,29 @@ func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.Compon
 func SyncAsyncGrowingIndexBuild(ctx context.Context, params *paramtable.ComponentParam) {
 	v := params.QueryNodeCfg.InterimIndexAsyncBuild.GetAsBool()
 	C.SegcoreSetEnableAsyncGrowingIndexBuild(C.bool(v))
+	finalizeBudgetMs := params.QueryNodeCfg.InterimIndexAsyncFinalizeBudgetMs.GetAsInt64()
+	C.SegcoreSetAsyncGrowingIndexFinalizeBudgetMs(C.int64_t(finalizeBudgetMs))
+	catchupDeadlineMs := params.QueryNodeCfg.InterimIndexAsyncCatchupDeadlineMs.GetAsInt64()
+	C.SegcoreSetAsyncGrowingIndexCatchupDeadlineMs(C.int64_t(catchupDeadlineMs))
 	params.Watch(params.QueryNodeCfg.InterimIndexAsyncBuild.Key,
 		config.NewHandler("qn.segcore.asyncGrowingBuild", func(evt *config.Event) {
 			nv := params.QueryNodeCfg.InterimIndexAsyncBuild.GetAsBool()
 			C.SegcoreSetEnableAsyncGrowingIndexBuild(C.bool(nv))
 			mlog.Info(ctx, "asyncGrowingBuild updated, affects growing segments created afterwards",
 				mlog.Bool("value", nv))
+		}))
+	params.Watch(params.QueryNodeCfg.InterimIndexAsyncFinalizeBudgetMs.Key,
+		config.NewHandler("qn.segcore.asyncGrowingFinalizeBudgetMs", func(evt *config.Event) {
+			nv := params.QueryNodeCfg.InterimIndexAsyncFinalizeBudgetMs.GetAsInt64()
+			C.SegcoreSetAsyncGrowingIndexFinalizeBudgetMs(C.int64_t(nv))
+			mlog.Info(ctx, "asyncGrowingFinalizeBudgetMs updated, affects growing segments created afterwards",
+				mlog.Int64("value", nv))
+		}))
+	params.Watch(params.QueryNodeCfg.InterimIndexAsyncCatchupDeadlineMs.Key,
+		config.NewHandler("qn.segcore.asyncGrowingCatchupDeadlineMs", func(evt *config.Event) {
+			nv := params.QueryNodeCfg.InterimIndexAsyncCatchupDeadlineMs.GetAsInt64()
+			C.SegcoreSetAsyncGrowingIndexCatchupDeadlineMs(C.int64_t(nv))
+			mlog.Info(ctx, "asyncGrowingCatchupDeadlineMs updated, affects growing segments created afterwards",
+				mlog.Int64("value", nv))
 		}))
 }

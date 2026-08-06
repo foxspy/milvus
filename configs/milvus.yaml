@@ -547,6 +547,8 @@ queryNode:
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
       asyncGrowingBuild: true # build the first growing interim index in background instead of blocking insert; hot update affects segments created afterwards
+      asyncGrowingFinalizeBudgetMs: 20 # maximum estimated locked-finalize time; hot update affects segments created afterwards
+      asyncGrowingCatchupDeadlineMs: 30000 # maximum catch-up time before discarding the unpublished index and falling back to raw search
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
     enableGISSplitFusion: true # Enable GIS filter coarse/refine split + same-column fusion optimization

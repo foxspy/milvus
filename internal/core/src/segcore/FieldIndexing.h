@@ -387,11 +387,6 @@ class VectorFieldIndexing : public FieldIndexing {
     SearchInfo
     get_search_params(const SearchInfo& searchInfo) const;
 
-    // Catch-up rounds without the gap shrinking before CatchUp gives up on
-    // converging and forces the locked finalize. Public so the stall test
-    // asserts against the production value instead of a copy of it.
-    static constexpr int kMaxStallRounds = 8;
-
  private:
     void
     recreate_index(DataType data_type, const VectorBase* field_raw_data);
@@ -572,6 +567,10 @@ class VectorFieldIndexing : public FieldIndexing {
     // read is race-free and a hot toggle only affects growing segments
     // created later.
     const bool async_build_enabled_;
+    // Per-field snapshots of the async catch-up policy. As with the enable
+    // switch, hot updates affect only growing segments created afterwards.
+    const int64_t async_finalize_budget_ms_;
+    const int64_t async_catchup_deadline_ms_;
 
     std::atomic<GrowingIndexState> state_{GrowingIndexState::kNotBuilt};
     // Monotonic logical raw-data watermark: the largest reserved_offset + size

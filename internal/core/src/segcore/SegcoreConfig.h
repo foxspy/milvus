@@ -208,6 +208,30 @@ class SegcoreConfig {
     }
 
     void
+    set_async_growing_index_finalize_budget_ms(int64_t value) {
+        async_growing_index_finalize_budget_ms_.store(
+            value, std::memory_order_relaxed);
+    }
+
+    int64_t
+    get_async_growing_index_finalize_budget_ms() const {
+        return async_growing_index_finalize_budget_ms_.load(
+            std::memory_order_relaxed);
+    }
+
+    void
+    set_async_growing_index_catchup_deadline_ms(int64_t value) {
+        async_growing_index_catchup_deadline_ms_.store(
+            value, std::memory_order_relaxed);
+    }
+
+    int64_t
+    get_async_growing_index_catchup_deadline_ms() const {
+        return async_growing_index_catchup_deadline_ms_.load(
+            std::memory_order_relaxed);
+    }
+
+    void
     set_growing_index_build_pool_ratio(float ratio) {
         growing_index_build_pool_ratio_ = ratio;
     }
@@ -301,6 +325,10 @@ class SegcoreConfig {
     // this value once at construction (async_build_enabled_), not by the
     // per-segment SegcoreConfig copy.
     inline static std::atomic<bool> enable_async_growing_index_build_{true};
+    inline static std::atomic<int64_t> async_growing_index_finalize_budget_ms_{
+        20};
+    inline static std::atomic<int64_t> async_growing_index_catchup_deadline_ms_{
+        30000};
     // Capacity ratio (x CPU) of the background build pool; mirrors
     // queryNode.segcore.interimIndex.buildParallelRate so this layer never
     // out-submits the knowhere build pool. inline static because the pool is

@@ -92,6 +92,39 @@ class ScopedAsyncGrowingBuild {
     bool previous_;
 };
 
+class ScopedAsyncGrowingCatchupPolicy {
+ public:
+    ScopedAsyncGrowingCatchupPolicy(SegcoreConfig& config,
+                                    int64_t finalize_budget_ms,
+                                    int64_t catchup_deadline_ms)
+        : config_(config),
+          previous_finalize_budget_ms_(
+              config.get_async_growing_index_finalize_budget_ms()),
+          previous_catchup_deadline_ms_(
+              config.get_async_growing_index_catchup_deadline_ms()) {
+        config_.set_async_growing_index_finalize_budget_ms(finalize_budget_ms);
+        config_.set_async_growing_index_catchup_deadline_ms(
+            catchup_deadline_ms);
+    }
+
+    ~ScopedAsyncGrowingCatchupPolicy() {
+        config_.set_async_growing_index_finalize_budget_ms(
+            previous_finalize_budget_ms_);
+        config_.set_async_growing_index_catchup_deadline_ms(
+            previous_catchup_deadline_ms_);
+    }
+
+    ScopedAsyncGrowingCatchupPolicy(const ScopedAsyncGrowingCatchupPolicy&) =
+        delete;
+    ScopedAsyncGrowingCatchupPolicy&
+    operator=(const ScopedAsyncGrowingCatchupPolicy&) = delete;
+
+ private:
+    SegcoreConfig& config_;
+    int64_t previous_finalize_budget_ms_;
+    int64_t previous_catchup_deadline_ms_;
+};
+
 }  // namespace
 
 using Param = std::tuple<DataType,
@@ -1300,6 +1333,8 @@ TEST(GrowingIndexAsyncBuildTest, BuildOffInsertPathAndCatchesUp) {
     auto& config = SegcoreConfig::default_config();
     ScopedSegcoreConfigRestore config_restore(config);
     ScopedAsyncGrowingBuild async_build(config, true);
+    ScopedAsyncGrowingCatchupPolicy catchup_policy(
+        config, /*finalize_budget_ms=*/20, /*catchup_deadline_ms=*/30000);
     ApplyAsyncBuildConfig(config);
 
     auto fixture =
@@ -1713,6 +1748,51 @@ TEST(GrowingIndexAsyncBuildTest, CatchupFailureDisablesIndexAfterFirstBuild) {
         plan.get(), probe_vectors.data() + probe_row * kAsyncDim);
     auto probe_sr = segment->Search(plan.get(), probe_ph.get(), 1000000);
     ASSERT_EQ(probe_sr->seg_offsets_.size(), top_k);
+    EXPECT_EQ(probe_sr->seg_offsets_[0], probe_row);
+    EXPECT_NEAR(probe_sr->distances_[0], 0.0f, 1e-5);
+}
+
+// A CatchUp that cannot publish within its total deadline must discard the
+// unpublished index and permanently use the complete raw-data path. A zero
+// deadline is a white-box test value (production config rejects non-positive
+// values) that makes the terminal path deterministic.
+TEST(GrowingIndexAsyncBuildTest, CatchupDeadlineFallsBackToRawSearch) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ScopedAsyncGrowingCatchupPolicy catchup_policy(
+        config, /*finalize_budget_ms=*/0, /*catchup_deadline_ms=*/0);
+    ApplyAsyncBuildConfig(config);
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+
+    constexpr int64_t trigger_batch = 25000;
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto trigger_data =
+        InsertAsyncBatch(segment.get(), fixture.schema, trigger_batch, 5);
+    ASSERT_TRUE(WaitState(segment_impl,
+                          fixture.vec,
+                          VectorFieldIndexing::GrowingIndexState::kDisabled,
+                          /*timeout_ms=*/120000));
+    EXPECT_FALSE(
+        segment_impl->get_indexing_record().SyncDataWithIndex(fixture.vec));
+    EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec), 0);
+
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        fixture.schema, fixture.plan_str.data(), fixture.plan_str.size());
+    constexpr int64_t probe_row = 137;
+    auto probe_vectors = trigger_data.get_col<float>(fixture.vec);
+    auto probe_ph = MakeSingleDensePlaceholder(
+        plan.get(), probe_vectors.data() + probe_row * kAsyncDim);
+    auto probe_sr = segment->Search(plan.get(), probe_ph.get(), 1000000);
+    ASSERT_FALSE(probe_sr->seg_offsets_.empty());
     EXPECT_EQ(probe_sr->seg_offsets_[0], probe_row);
     EXPECT_NEAR(probe_sr->distances_[0], 0.0f, 1e-5);
 }
@@ -2629,16 +2709,16 @@ TEST(GrowingIndexAsyncBuildTest, DestroyWhileQueuedReturnsImmediately) {
     segments.clear();
 }
 
-// Spec §7 G2 step 4. A writer that keeps outpacing the catch-up must not keep
-// the field in kBuilding forever: after kMaxStallRounds (8) rounds without the
-// gap improving, CatchUp gives up on the lock-free loop and forces the locked
-// finalize. The hook below re-opens the gap after *every* catch-up round, so
-// the loop can never observe gap == 0 -- the only exit left is the stall
-// fallback, and WaitSynced returning true is the proof that it fired.
-TEST(GrowingIndexAsyncBuildTest, StallFallbackForcesFinalize) {
+// A writer that keeps outpacing catch-up must not turn a large backlog into a
+// locked finalize. The hook re-opens the gap after every catch-up round. The
+// production loop must keep consuming lock-free until the hook stops, rather
+// than using a fixed round count to block inserts and absorb the whole gap.
+TEST(GrowingIndexAsyncBuildTest, LargeGapDoesNotForceLockedFinalize) {
     auto& config = SegcoreConfig::default_config();
     ScopedSegcoreConfigRestore config_restore(config);
     ScopedAsyncGrowingBuild async_build(config, true);
+    ScopedAsyncGrowingCatchupPolicy catchup_policy(
+        config, /*finalize_budget_ms=*/0, /*catchup_deadline_ms=*/30000);
     ApplyAsyncBuildConfig(config);
 
     auto fixture =
@@ -2648,17 +2728,11 @@ TEST(GrowingIndexAsyncBuildTest, StallFallbackForcesFinalize) {
                               /*nullable=*/false);
 
     constexpr int64_t trigger_batch = 25000;
-    // Smaller than the gap left by the triggering batch (25000 - 22698 = 2302)
-    // so that the *second* round already sets the running minimum and every
-    // later round ties it: gap >= min_gap on each of them, which is what makes
-    // stall_rounds climb monotonically to kMaxStallRounds.
+    // Smaller than the gap left by the triggering batch (25000 - 22698 =
+    // 2302), so each round leaves another substantial backlog for the next
+    // rate/ETA decision.
     constexpr int64_t stall_batch = 2000;
-    // Safety valve only: with the arithmetic above the fallback fires around
-    // round 10, so reaching this cap would mean the fallback did not fire and
-    // the loop exited because the hook stopped feeding it.
-    constexpr int kHookRoundCap = 40;
-    // The production constant itself, not a copy of it.
-    constexpr int kMaxStallRounds = VectorFieldIndexing::kMaxStallRounds;
+    constexpr int kHookRoundCap = 20;
 
     std::atomic<SegmentGrowing*> segment_ptr{nullptr};
     std::atomic<int> rounds{0};
@@ -2721,13 +2795,10 @@ TEST(GrowingIndexAsyncBuildTest, StallFallbackForcesFinalize) {
     ASSERT_TRUE(WaitSynced(segment_impl, fixture.vec, /*timeout_ms=*/120000));
 
     const int64_t observed_rounds = rounds.load();
-    EXPECT_LT(observed_rounds, kHookRoundCap)
-        << "the catch-up loop only terminated after the hook stopped writing, "
-           "so the stall fallback was not what ended it";
-    EXPECT_GE(observed_rounds, kMaxStallRounds);
-    // Every row ever inserted -- including the ones the hook slipped in after
-    // the last catch-up round -- is in the index: the forced finalize absorbs
-    // the remainder under append_mutex_ before publishing.
+    ASSERT_EQ(observed_rounds, kHookRoundCap)
+        << "catch-up finalized a large gap before the writer hook stopped";
+    // Once the hook stops, the lock-free loop can converge and the bounded
+    // final publish still covers every inserted row.
     const int64_t total_rows = trigger_batch + observed_rounds * stall_batch;
     EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec), total_rows);
     EXPECT_EQ(segment->get_row_count(), total_rows);
