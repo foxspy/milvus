@@ -120,6 +120,18 @@ func cleanupTaskError(task *queuedTask) error {
 	return context.DeadlineExceeded
 }
 
+func taskDeadlineError(task Task, now time.Time, deadlineAdvance time.Duration) error {
+	if err := task.Context().Err(); err != nil {
+		return err
+	}
+
+	deadline, ok := task.Context().Deadline()
+	if ok && !now.Add(deadlineAdvance).Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
 // MergeTask is a Task which can be merged with other task
 type MergeTask interface {
 	Task

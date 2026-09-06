@@ -4774,7 +4774,7 @@ user-task-polling:
 		Key:          "queryNode.scheduler.scheduleReadPolicy.taskDeadlineAdvance",
 		Version:      "2.6.17",
 		DefaultValue: "50ms",
-		Doc:          "Advance duration for cleaning queued query node read tasks before their context deadline. It supports duration strings such as 50ms and 1s. A bare number is interpreted as milliseconds for compatibility.",
+		Doc:          "Advance duration for rejecting or cleaning query node read tasks before their context deadline. It supports duration strings such as 50ms and 1s. A bare number is interpreted as milliseconds for compatibility.",
 		Formatter:    formatDurationWithMillisecondFallback,
 		Export:       true,
 	}

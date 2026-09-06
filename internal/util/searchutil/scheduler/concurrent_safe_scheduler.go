@@ -190,13 +190,15 @@ func (s *scheduler) consumeRecvChan(req addTaskReq, limit int, now time.Time) {
 // HandleAddTaskRequest handle a add task request.
 // Return true if the process can be continued.
 func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, now time.Time) bool {
-	if maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
+	deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
+	deadlineErr := taskDeadlineError(req.task, now, deadlineAdvance)
+	if deadlineErr == nil && maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
 		s.cleanupExpiredTasks(now)
 	}
 
-	if err := req.task.Context().Err(); err != nil {
-		log.Warn("task canceled before enqueue", zap.Error(err))
-		req.err <- err
+	if deadlineErr != nil {
+		log.Warn("task canceled or too close to deadline before enqueue", zap.Error(deadlineErr))
+		req.err <- deadlineErr
 	} else if maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
 		err := merr.WrapErrTooManyRequests(
 			int32(maxWaitTaskNum),
@@ -252,9 +254,10 @@ func (s *scheduler) exec() {
 			log.Info("scheduler execChan closed, worker exit")
 			return
 		}
-		// Skip this task if task is canceled.
-		if err := t.Context().Err(); err != nil {
-			log.Warn("task canceled before executing", zap.Error(err))
+		// Skip this task if it is canceled or too close to its deadline.
+		deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
+		if err := taskDeadlineError(t, time.Now(), deadlineAdvance); err != nil {
+			log.Warn("task canceled or too close to deadline before executing", zap.Error(err))
 			t.Done(err)
 			continue
 		}
@@ -265,6 +268,15 @@ func (s *scheduler) exec() {
 		}
 
 		s.getPool(t).Submit(func() (any, error) {
+			// Submit blocks while the pool is full, so the task may expire after
+			// the scheduler's first check and before a worker actually starts it.
+			deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
+			if err := taskDeadlineError(t, time.Now(), deadlineAdvance); err != nil {
+				log.Warn("task canceled or too close to deadline after waiting for executor", zap.Error(err))
+				t.Done(err)
+				return nil, err
+			}
+
 			// Update concurrency metric and notify task done.
 			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 			collector.Counter.Inc(metricsinfo.ExecuteQueueType)

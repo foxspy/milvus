@@ -284,6 +284,30 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestCleansTasksNearDeadlineBeforeQu
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
 }
 
+func (s *SchedulerSuite) TestHandleAddTaskRequestRejectsTaskNearDeadline() {
+	paramtable.Init()
+	old := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue("50ms")
+	defer paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue(old)
+
+	now := time.Now()
+	scheduler := &scheduler{
+		policy:           newFIFOPolicy(),
+		schedulerCounter: schedulerCounter{},
+	}
+
+	ctx, cancel := context.WithDeadline(context.Background(), now.Add(30*time.Millisecond))
+	defer cancel()
+	errCh := make(chan error, 1)
+	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
+		task: newMockTask(mockTaskConfig{ctx: ctx, nq: 1}),
+		err:  errCh,
+	}, 10, now)
+
+	s.True(keepConsuming)
+	s.ErrorIs(<-errCh, context.DeadlineExceeded)
+	s.Zero(scheduler.GetWaitingTaskTotal())
+}
+
 func (s *SchedulerSuite) TestAddReturnsContextErrorWhenReceiveBlocks() {
 	paramtable.Init()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -418,6 +442,56 @@ func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
 	s.Equal(uint64(1), readTaskExecuteDurationCount(metrics.SuccessLabel))
 	s.Equal(uint64(1), readTaskExecuteDurationCount(metrics.FailLabel))
 	s.Equal(uint64(1), readTaskExecuteDurationCount(metrics.CancelLabel))
+}
+
+func (s *SchedulerSuite) TestExecRechecksDeadlineAfterWaitingForWorker() {
+	paramtable.Init()
+	old := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue("50ms")
+	defer paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue(old)
+
+	scheduler := &scheduler{
+		execChan: make(chan Task),
+		pool:     conc.NewPool[any](1, conc.WithPreAlloc(true)),
+	}
+	scheduler.wg.Add(1)
+	go scheduler.exec()
+	defer func() {
+		close(scheduler.execChan)
+		scheduler.wg.Wait()
+		scheduler.pool.Release()
+	}()
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstTask := newMockTask(mockTaskConfig{
+		executeCost: time.Millisecond,
+		execution: func(ctx context.Context) error {
+			close(firstStarted)
+			<-releaseFirst
+			return nil
+		},
+	})
+	scheduler.execChan <- firstTask
+	<-firstStarted
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	var secondExecuted atomic.Bool
+	secondTask := newMockTask(mockTaskConfig{
+		ctx:         ctx,
+		executeCost: time.Millisecond,
+		execution: func(ctx context.Context) error {
+			secondExecuted.Store(true)
+			return nil
+		},
+	})
+	scheduler.execChan <- secondTask
+	<-ctx.Done()
+	close(releaseFirst)
+
+	s.NoError(firstTask.(*MockTask).Wait())
+	s.ErrorIs(secondTask.(*MockTask).Wait(), context.DeadlineExceeded)
+	s.False(secondExecuted.Load())
 }
 
 func (s *SchedulerSuite) TestQueuedTaskTimingHelpers() {
