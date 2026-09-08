@@ -2,13 +2,21 @@ package scheduler
 
 import (
 	"container/ring"
+	"sort"
 	"time"
 )
 
+type queuedTaskLess func(left, right *queuedTask) bool
+
 func newMergeTaskQueue(group string) *mergeTaskQueue {
+	return newMergeTaskQueueWithOrder(group, nil)
+}
+
+func newMergeTaskQueueWithOrder(group string, less queuedTaskLess) *mergeTaskQueue {
 	return &mergeTaskQueue{
 		name:             group,
 		tasks:            make([]*queuedTask, 0),
+		less:             less,
 		cleanupTimestamp: time.Now(),
 	}
 }
@@ -16,6 +24,7 @@ func newMergeTaskQueue(group string) *mergeTaskQueue {
 type mergeTaskQueue struct {
 	name             string
 	tasks            []*queuedTask
+	less             queuedTaskLess
 	count            int
 	cleanupTimestamp time.Time
 }
@@ -25,10 +34,36 @@ func (q *mergeTaskQueue) len() int {
 	return q.count
 }
 
-// push add a new task to the end of taskQueue.
+// push adds a task in stable comparator order, or at the tail when no
+// comparator is configured.
 func (q *mergeTaskQueue) push(task *queuedTask) {
+	if q.less != nil {
+		q.compactRemoved()
+		index := sort.Search(len(q.tasks), func(i int) bool {
+			return q.less(task, q.tasks[i])
+		})
+		q.tasks = append(q.tasks, nil)
+		copy(q.tasks[index+1:], q.tasks[index:])
+		q.tasks[index] = task
+		q.count++
+		return
+	}
 	q.tasks = append(q.tasks, task)
 	q.count++
+}
+
+func (q *mergeTaskQueue) compactRemoved() {
+	if len(q.tasks) == q.count {
+		return
+	}
+	validTasks := q.tasks[:0]
+	for _, task := range q.tasks {
+		if task.valid() {
+			validTasks = append(validTasks, task)
+		}
+	}
+	clear(q.tasks[len(validTasks):])
+	q.tasks = validTasks
 }
 
 // front returns the first element of taskQueue.
@@ -166,6 +201,12 @@ func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio fl
 		if !taskInQueue.valid() {
 			continue
 		}
+		// Merging an earlier request into a later one would hide the earlier
+		// order key and break the ordering guarantee. Keep it as a separate
+		// task so ordered insertion can move it ahead.
+		if q.less != nil && q.less(task, taskInQueue) {
+			continue
+		}
 		if taskInQueue := tryIntoMergeTask(taskInQueue.Task); taskInQueue != nil {
 			// Try to merge it if limit of nq is enough.
 			if (canMergeNQ(taskInQueue, mergeTask, maxNQ, nqMergeRatio) &&
@@ -287,49 +328,48 @@ func (q *fairPollingTaskQueue) cleanup(now time.Time) []*queuedTask {
 	return removed
 }
 
-// pop pop next ready task.
-func (q *fairPollingTaskQueue) pop(queueExpire time.Duration) *queuedTask {
-	// Return directly if there's no task exists.
-	if q.count == 0 {
+// peek returns the next task without advancing the round-robin checkpoint.
+func (q *fairPollingTaskQueue) peek(queueExpire time.Duration) *queuedTask {
+	if q.count == 0 || q.checkpoint == nil {
 		return nil
 	}
-	checkpoint := q.checkpoint
-	queuesLen := q.checkpoint.Len()
 
+	checkpoint := q.checkpoint
+	queuesLen := checkpoint.Len()
 	for i := 0; i < queuesLen; i++ {
 		next := checkpoint.Next()
-		// Find task in this queue.
 		queue := checkpoint.Value.(*mergeTaskQueue)
-
-		// empty task queue for this user.
 		if queue.len() == 0 {
-			// expire the queue.
 			if queue.expire(queueExpire) {
 				delete(q.route, queue.name)
 				if checkpoint.Len() == 1 {
-					checkpoint = nil
-					break
-				} else {
-					checkpoint.Prev().Unlink(1)
+					q.checkpoint = nil
+					return nil
 				}
+				checkpoint.Prev().Unlink(1)
 			}
 			checkpoint = next
 			continue
 		}
-		task := queue.pop()
-		if task.valid() {
-			q.count--
-		}
-		if !task.valid() {
-			checkpoint = next
-			continue
-		}
-		checkpoint = next
+
 		q.checkpoint = checkpoint
-		return task
+		return queue.front()
 	}
 
-	// Update checkpoint.
 	q.checkpoint = checkpoint
 	return nil
+}
+
+// pop pop next ready task.
+func (q *fairPollingTaskQueue) pop(queueExpire time.Duration) *queuedTask {
+	task := q.peek(queueExpire)
+	if !task.valid() {
+		return nil
+	}
+
+	checkpoint := q.checkpoint
+	task = checkpoint.Value.(*mergeTaskQueue).pop()
+	q.count--
+	q.checkpoint = checkpoint.Next()
+	return task
 }

@@ -22,6 +22,74 @@ func TestFIFOPolicy(t *testing.T) {
 	testCommonPolicyOperation(t, newFIFOPolicy())
 }
 
+func TestFIFOPolicyOrdersByProxySequence(t *testing.T) {
+	paramtable.Init()
+	orders := []TaskOrder{
+		{Timestamp: 30, MessageID: 300, SourceID: 3},
+		{Timestamp: 10, MessageID: 100, SourceID: 1},
+		{Timestamp: 20, MessageID: 200, SourceID: 2},
+	}
+
+	policyA := newFIFOPolicy()
+	policyB := newFIFOPolicy()
+	for _, i := range []int{0, 1, 2} {
+		_, err := policyA.Push(newQueuedTask(newMockTask(mockTaskConfig{order: orders[i]}), time.Now()))
+		assert.NoError(t, err)
+	}
+	for _, i := range []int{2, 0, 1} {
+		_, err := policyB.Push(newQueuedTask(newMockTask(mockTaskConfig{order: orders[i]}), time.Now()))
+		assert.NoError(t, err)
+	}
+
+	expected := []TaskOrder{orders[1], orders[2], orders[0]}
+	for _, expectedOrder := range expected {
+		assert.Equal(t, expectedOrder, policyA.Pop(time.Now()).Order())
+		assert.Equal(t, expectedOrder, policyB.Pop(time.Now()).Order())
+	}
+}
+
+func TestFIFOPolicyUsesMessageAndSourceAsStableTieBreakers(t *testing.T) {
+	paramtable.Init()
+	policy := newFIFOPolicy()
+	orders := []TaskOrder{
+		{Timestamp: 10, MessageID: 2, SourceID: 2},
+		{Timestamp: 10, MessageID: 1, SourceID: 2},
+		{Timestamp: 10, MessageID: 1, SourceID: 1},
+	}
+	for _, order := range orders {
+		_, err := policy.Push(newQueuedTask(newMockTask(mockTaskConfig{order: order}), time.Now()))
+		assert.NoError(t, err)
+	}
+
+	assert.Equal(t, TaskOrder{Timestamp: 10, MessageID: 1, SourceID: 1}, policy.Pop(time.Now()).Order())
+	assert.Equal(t, TaskOrder{Timestamp: 10, MessageID: 1, SourceID: 2}, policy.Pop(time.Now()).Order())
+	assert.Equal(t, TaskOrder{Timestamp: 10, MessageID: 2, SourceID: 2}, policy.Pop(time.Now()).Order())
+}
+
+func TestFIFOPolicyDoesNotMergeEarlierOrderIntoLaterTask(t *testing.T) {
+	paramtable.Init()
+	policy := newFIFOPolicy()
+	later := newMockTask(mockTaskConfig{
+		order:     TaskOrder{Timestamp: 20, MessageID: 20, SourceID: 1},
+		mergeAble: true,
+		nq:        1,
+	})
+	earlier := newMockTask(mockTaskConfig{
+		order:     TaskOrder{Timestamp: 10, MessageID: 10, SourceID: 1},
+		mergeAble: true,
+		nq:        1,
+	})
+
+	added, err := policy.Push(newQueuedTask(later, time.Now()))
+	assert.NoError(t, err)
+	assert.Equal(t, 1, added)
+	added, err = policy.Push(newQueuedTask(earlier, time.Now()))
+	assert.NoError(t, err)
+	assert.Equal(t, 1, added)
+	assert.Equal(t, 2, policy.Len())
+	assert.Equal(t, earlier.Order(), policy.Pop(time.Now()).Order())
+}
+
 func TestPolicyCleanupExpiredTasks(t *testing.T) {
 	paramtable.Init()
 	for name, policy := range map[string]schedulePolicy{

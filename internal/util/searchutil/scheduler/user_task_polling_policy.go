@@ -71,6 +71,11 @@ func (p *userTaskPollingPolicy) Pop(now time.Time) *queuedTask {
 	return p.queue.pop(expire)
 }
 
+func (p *userTaskPollingPolicy) Peek(now time.Time) *queuedTask {
+	expire := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskQueueExpire.GetAsDuration(time.Second)
+	return p.queue.peek(expire)
+}
+
 // Len get ready task counts.
 func (p *userTaskPollingPolicy) Len() int {
 	return p.queue.len()

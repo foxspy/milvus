@@ -73,6 +73,15 @@ func (t *QueryTask) Context() context.Context {
 	return t.ctx
 }
 
+func (t *QueryTask) Order() scheduler.TaskOrder {
+	base := t.req.GetReq().GetBase()
+	return scheduler.TaskOrder{
+		Timestamp: base.GetTimestamp(),
+		MessageID: base.GetMsgID(),
+		SourceID:  base.GetSourceID(),
+	}
+}
+
 // PreExecute the task, only call once.
 func (t *QueryTask) PreExecute() error {
 	// Update task wait time metric before execute

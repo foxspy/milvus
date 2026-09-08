@@ -367,15 +367,46 @@ func (s *SchedulerSuite) TestSetupExecListenerRecordsPoppedExpiredTask() {
 	s.NoError(err)
 	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
 
-	task, nq, execChan := scheduler.setupExecListener(nil, now)
+	task, execChan := scheduler.setupExecListener(now)
 
 	s.False(task.valid())
-	s.Zero(nq)
 	s.Nil(execChan)
 	s.Equal(int64(0), scheduler.GetWaitingTaskTotal())
 	s.ErrorIs(expiredTask.Wait(), context.DeadlineExceeded)
 	s.Equal(uint64(1), readTaskQueueDurationCount(readTaskQueueOutcomeExpired))
 	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
+}
+
+func (s *SchedulerSuite) TestSetupExecListenerKeepsTaskReorderableUntilDispatch() {
+	now := time.Now()
+	scheduler := &scheduler{
+		policy:           newFIFOPolicy(),
+		execChan:         make(chan Task),
+		schedulerCounter: schedulerCounter{},
+	}
+
+	later := newQueuedTask(newMockTask(mockTaskConfig{
+		order: TaskOrder{Timestamp: 20, MessageID: 20, SourceID: 1},
+	}), now)
+	added, err := scheduler.policy.Push(later)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(int64(added), later.NQ())
+
+	peeked, execChan := scheduler.setupExecListener(now)
+	s.Equal(later.Order(), peeked.Order())
+	s.NotNil(execChan)
+
+	earlier := newQueuedTask(newMockTask(mockTaskConfig{
+		order: TaskOrder{Timestamp: 10, MessageID: 10, SourceID: 1},
+	}), now.Add(time.Millisecond))
+	added, err = scheduler.policy.Push(earlier)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(int64(added), earlier.NQ())
+
+	peeked, execChan = scheduler.setupExecListener(now.Add(time.Millisecond))
+	s.Equal(earlier.Order(), peeked.Order())
+	s.NotNil(execChan)
+	s.Equal(int64(2), scheduler.GetWaitingTaskTotal())
 }
 
 func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
@@ -418,6 +449,52 @@ func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
 	s.Equal(uint64(1), readTaskExecuteDurationCount(metrics.SuccessLabel))
 	s.Equal(uint64(1), readTaskExecuteDurationCount(metrics.FailLabel))
 	s.Equal(uint64(1), readTaskExecuteDurationCount(metrics.CancelLabel))
+}
+
+func (s *SchedulerSuite) TestExecRechecksDeadlineAfterWaitingForWorker() {
+	scheduler := &scheduler{
+		execChan: make(chan Task),
+		pool:     conc.NewPool[any](1, conc.WithPreAlloc(true)),
+	}
+	scheduler.wg.Add(1)
+	go scheduler.exec()
+	defer func() {
+		close(scheduler.execChan)
+		scheduler.wg.Wait()
+		scheduler.pool.Release()
+	}()
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstTask := newMockTask(mockTaskConfig{
+		executeCost: time.Millisecond,
+		execution: func(ctx context.Context) error {
+			close(firstStarted)
+			<-releaseFirst
+			return nil
+		},
+	})
+	scheduler.execChan <- firstTask
+	<-firstStarted
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	var secondExecuted atomic.Bool
+	secondTask := newMockTask(mockTaskConfig{
+		ctx:         ctx,
+		executeCost: time.Millisecond,
+		execution: func(ctx context.Context) error {
+			secondExecuted.Store(true)
+			return nil
+		},
+	})
+	scheduler.execChan <- secondTask
+	<-ctx.Done()
+	close(releaseFirst)
+
+	s.NoError(firstTask.(*MockTask).Wait())
+	s.ErrorIs(secondTask.(*MockTask).Wait(), context.DeadlineExceeded)
+	s.False(secondExecuted.Load())
 }
 
 func (s *SchedulerSuite) TestQueuedTaskTimingHelpers() {

@@ -308,10 +308,25 @@ func (sd *shardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int
 	return partStatMap
 }
 
+// shallowCopyMsgBase preserves the Proxy-assigned request identity and global
+// order while giving each fan-out request its own TargetID. Properties and
+// ReplicateInfo are read-only on this path and can remain shallow copies.
+func shallowCopyMsgBase(base *commonpb.MsgBase, targetID int64) *commonpb.MsgBase {
+	return &commonpb.MsgBase{
+		MsgType:       base.GetMsgType(),
+		MsgID:         base.GetMsgID(),
+		Timestamp:     base.GetTimestamp(),
+		SourceID:      base.GetSourceID(),
+		TargetID:      targetID,
+		Properties:    base.GetProperties(),
+		ReplicateInfo: base.GetReplicateInfo(),
+	}
+}
+
 func (sd *shardDelegator) shallowCopySearchRequest(req *internalpb.SearchRequest, targetID int64) *internalpb.SearchRequest {
 	// Create a new SearchRequest with the same fields
 	nodeReq := &internalpb.SearchRequest{
-		Base:                    &commonpb.MsgBase{TargetID: targetID},
+		Base:                    shallowCopyMsgBase(req.GetBase(), targetID),
 		ReqID:                   req.ReqID,
 		DbID:                    req.DbID,
 		CollectionID:            req.CollectionID,
@@ -362,7 +377,7 @@ func (sd *shardDelegator) shallowCopyRetrieveRequest(req *internalpb.RetrieveReq
 	// Base must be a new object since each copy needs different TargetID
 	// Slices are shallow copied (same underlying array) since they are read-only after copy
 	return &internalpb.RetrieveRequest{
-		Base:                         &commonpb.MsgBase{TargetID: targetID},
+		Base:                         shallowCopyMsgBase(req.GetBase(), targetID),
 		ReqID:                        req.ReqID,
 		DbID:                         req.DbID,
 		CollectionID:                 req.CollectionID,

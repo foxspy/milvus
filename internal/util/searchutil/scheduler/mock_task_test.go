@@ -16,6 +16,7 @@ var (
 
 type mockTaskConfig struct {
 	ctx         context.Context
+	order       TaskOrder
 	mergeAble   bool
 	nq          int64
 	username    string
@@ -35,6 +36,7 @@ func newMockTask(c mockTaskConfig) Task {
 	}
 	return &MockTask{
 		ctx:         c.ctx,
+		order:       c.order,
 		executeCost: c.executeCost,
 		notifier:    make(chan error, 1),
 		mergeAble:   c.mergeAble,
@@ -48,6 +50,7 @@ func newMockTask(c mockTaskConfig) Task {
 
 type MockTask struct {
 	ctx         context.Context
+	order       TaskOrder
 	executeCost time.Duration
 	notifier    chan error
 	mergeAble   bool
@@ -99,6 +102,10 @@ func (t *MockTask) Wait() error {
 // Return the context of task.
 func (t *MockTask) Context() context.Context {
 	return t.ctx
+}
+
+func (t *MockTask) Order() TaskOrder {
+	return t.order
 }
 
 func (t *MockTask) MergeWith(t2 Task) bool {

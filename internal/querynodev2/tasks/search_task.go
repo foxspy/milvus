@@ -102,6 +102,15 @@ func (t *SearchTask) Context() context.Context {
 	return t.ctx
 }
 
+func (t *SearchTask) Order() scheduler.TaskOrder {
+	base := t.req.GetReq().GetBase()
+	return scheduler.TaskOrder{
+		Timestamp: base.GetTimestamp(),
+		MessageID: base.GetMsgID(),
+		SourceID:  base.GetSourceID(),
+	}
+}
+
 func (t *SearchTask) PreExecute() error {
 	// Update task wait time metric before execute
 	nodeID := strconv.FormatInt(t.GetNodeID(), 10)
