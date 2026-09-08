@@ -4792,7 +4792,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.scheduler.scheduleReadPolicy.name",
 		Version:      "2.3.0",
 		DefaultValue: "fifo",
-		Doc: `fifo: Read tasks are ordered by the Proxy-assigned timestamp, message ID, and source ID so fan-out sub-tasks use a consistent order across QueryNodes. Tasks with identical order keys retain their local arrival order.
+		Doc: `fifo: Read tasks are ordered by the Proxy-assigned timestamp so fan-out sub-tasks are consumed in timestamp order across QueryNodes. Tasks with identical timestamps retain their local arrival order.
 user-task-polling:
 	The user's tasks will be polled one by one and scheduled.
 	Scheduling is fair on task granularity.

@@ -77,8 +77,6 @@ func (t *QueryTask) Order() scheduler.TaskOrder {
 	base := t.req.GetReq().GetBase()
 	return scheduler.TaskOrder{
 		Timestamp: base.GetTimestamp(),
-		MessageID: base.GetMsgID(),
-		SourceID:  base.GetSourceID(),
 	}
 }
 

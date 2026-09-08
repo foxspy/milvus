@@ -12,25 +12,15 @@ const (
 	schedulePolicyNameUserTaskPolling = "user-task-polling"
 )
 
-// TaskOrder is the global order assigned by Proxy before a read request is
-// fanned out to QueryNodes. Every sub-task of one request carries the same
-// order, so independently receiving QueryNodes can make the same scheduling
-// decision for tasks that are still waiting in their queues.
+// TaskOrder is the timestamp assigned by Proxy before a read request is fanned
+// out to QueryNodes. Every sub-task of one request carries the same timestamp.
 type TaskOrder struct {
 	Timestamp uint64
-	MessageID int64
-	SourceID  int64
 }
 
 // Before reports whether o must be scheduled before other.
 func (o TaskOrder) Before(other TaskOrder) bool {
-	if o.Timestamp != other.Timestamp {
-		return o.Timestamp < other.Timestamp
-	}
-	if o.MessageID != other.MessageID {
-		return o.MessageID < other.MessageID
-	}
-	return o.SourceID < other.SourceID
+	return o.Timestamp < other.Timestamp
 }
 
 // NewScheduler create a scheduler by policyName.
@@ -161,7 +151,7 @@ type MergeTask interface {
 type Task interface {
 	Context() context.Context
 
-	// Order returns the Proxy-assigned global order of the original request.
+	// Order returns the Proxy-assigned timestamp of the original request.
 	Order() TaskOrder
 
 	// Return the username which task is belong to.

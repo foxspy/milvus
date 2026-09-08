@@ -386,7 +386,7 @@ func (s *SchedulerSuite) TestSetupExecListenerKeepsTaskReorderableUntilDispatch(
 	}
 
 	later := newQueuedTask(newMockTask(mockTaskConfig{
-		order: TaskOrder{Timestamp: 20, MessageID: 20, SourceID: 1},
+		order: TaskOrder{Timestamp: 20},
 	}), now)
 	added, err := scheduler.policy.Push(later)
 	s.NoError(err)
@@ -397,7 +397,7 @@ func (s *SchedulerSuite) TestSetupExecListenerKeepsTaskReorderableUntilDispatch(
 	s.NotNil(execChan)
 
 	earlier := newQueuedTask(newMockTask(mockTaskConfig{
-		order: TaskOrder{Timestamp: 10, MessageID: 10, SourceID: 1},
+		order: TaskOrder{Timestamp: 10},
 	}), now.Add(time.Millisecond))
 	added, err = scheduler.policy.Push(earlier)
 	s.NoError(err)
