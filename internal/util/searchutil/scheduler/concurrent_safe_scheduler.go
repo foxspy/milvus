@@ -265,6 +265,14 @@ func (s *scheduler) exec() {
 		}
 
 		s.getPool(t).Submit(func() (any, error) {
+			// Submit blocks while the pool is full, so the task may expire after
+			// the scheduler's first check and before a worker actually starts it.
+			if err := t.Context().Err(); err != nil {
+				log.Warn("task canceled after waiting for executor", zap.Error(err))
+				t.Done(err)
+				return nil, err
+			}
+
 			// Update concurrency metric and notify task done.
 			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 			collector.Counter.Inc(metricsinfo.ExecuteQueueType)
