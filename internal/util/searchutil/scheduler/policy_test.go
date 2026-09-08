@@ -22,12 +22,12 @@ func TestFIFOPolicy(t *testing.T) {
 	testCommonPolicyOperation(t, newFIFOPolicy())
 }
 
-func TestFIFOPolicyOrdersByProxySequence(t *testing.T) {
+func TestFIFOPolicyOrdersByProxyTimestamp(t *testing.T) {
 	paramtable.Init()
 	orders := []TaskOrder{
-		{Timestamp: 30, MessageID: 300, SourceID: 3},
-		{Timestamp: 10, MessageID: 100, SourceID: 1},
-		{Timestamp: 20, MessageID: 200, SourceID: 2},
+		{Timestamp: 30},
+		{Timestamp: 10},
+		{Timestamp: 20},
 	}
 
 	policyA := newFIFOPolicy()
@@ -48,34 +48,34 @@ func TestFIFOPolicyOrdersByProxySequence(t *testing.T) {
 	}
 }
 
-func TestFIFOPolicyUsesMessageAndSourceAsStableTieBreakers(t *testing.T) {
+func TestFIFOPolicyKeepsLocalArrivalOrderForEqualTimestamps(t *testing.T) {
 	paramtable.Init()
 	policy := newFIFOPolicy()
-	orders := []TaskOrder{
-		{Timestamp: 10, MessageID: 2, SourceID: 2},
-		{Timestamp: 10, MessageID: 1, SourceID: 2},
-		{Timestamp: 10, MessageID: 1, SourceID: 1},
+	tasks := []Task{
+		newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 10}}),
+		newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 10}}),
+		newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 10}}),
 	}
-	for _, order := range orders {
-		_, err := policy.Push(newQueuedTask(newMockTask(mockTaskConfig{order: order}), time.Now()))
+	for _, task := range tasks {
+		_, err := policy.Push(newQueuedTask(task, time.Now()))
 		assert.NoError(t, err)
 	}
 
-	assert.Equal(t, TaskOrder{Timestamp: 10, MessageID: 1, SourceID: 1}, policy.Pop(time.Now()).Order())
-	assert.Equal(t, TaskOrder{Timestamp: 10, MessageID: 1, SourceID: 2}, policy.Pop(time.Now()).Order())
-	assert.Equal(t, TaskOrder{Timestamp: 10, MessageID: 2, SourceID: 2}, policy.Pop(time.Now()).Order())
+	for _, task := range tasks {
+		assert.Same(t, task, policy.Pop(time.Now()).Task)
+	}
 }
 
 func TestFIFOPolicyDoesNotMergeEarlierOrderIntoLaterTask(t *testing.T) {
 	paramtable.Init()
 	policy := newFIFOPolicy()
 	later := newMockTask(mockTaskConfig{
-		order:     TaskOrder{Timestamp: 20, MessageID: 20, SourceID: 1},
+		order:     TaskOrder{Timestamp: 20},
 		mergeAble: true,
 		nq:        1,
 	})
 	earlier := newMockTask(mockTaskConfig{
-		order:     TaskOrder{Timestamp: 10, MessageID: 10, SourceID: 1},
+		order:     TaskOrder{Timestamp: 10},
 		mergeAble: true,
 		nq:        1,
 	})
