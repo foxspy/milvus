@@ -284,30 +284,6 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestCleansTasksNearDeadlineBeforeQu
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
 }
 
-func (s *SchedulerSuite) TestHandleAddTaskRequestRejectsTaskNearDeadline() {
-	paramtable.Init()
-	old := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue("50ms")
-	defer paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue(old)
-
-	now := time.Now()
-	scheduler := &scheduler{
-		policy:           newFIFOPolicy(),
-		schedulerCounter: schedulerCounter{},
-	}
-
-	ctx, cancel := context.WithDeadline(context.Background(), now.Add(30*time.Millisecond))
-	defer cancel()
-	errCh := make(chan error, 1)
-	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
-		task: newMockTask(mockTaskConfig{ctx: ctx, nq: 1}),
-		err:  errCh,
-	}, 10, now)
-
-	s.True(keepConsuming)
-	s.ErrorIs(<-errCh, context.DeadlineExceeded)
-	s.Zero(scheduler.GetWaitingTaskTotal())
-}
-
 func (s *SchedulerSuite) TestAddReturnsContextErrorWhenReceiveBlocks() {
 	paramtable.Init()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -391,15 +367,46 @@ func (s *SchedulerSuite) TestSetupExecListenerRecordsPoppedExpiredTask() {
 	s.NoError(err)
 	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
 
-	task, nq, execChan := scheduler.setupExecListener(nil, now)
+	task, execChan := scheduler.setupExecListener(now)
 
 	s.False(task.valid())
-	s.Zero(nq)
 	s.Nil(execChan)
 	s.Equal(int64(0), scheduler.GetWaitingTaskTotal())
 	s.ErrorIs(expiredTask.Wait(), context.DeadlineExceeded)
 	s.Equal(uint64(1), readTaskQueueDurationCount(readTaskQueueOutcomeExpired))
 	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
+}
+
+func (s *SchedulerSuite) TestSetupExecListenerKeepsTaskReorderableUntilDispatch() {
+	now := time.Now()
+	scheduler := &scheduler{
+		policy:           newFIFOPolicy(),
+		execChan:         make(chan Task),
+		schedulerCounter: schedulerCounter{},
+	}
+
+	later := newQueuedTask(newMockTask(mockTaskConfig{
+		order: TaskOrder{Timestamp: 20, MessageID: 20, SourceID: 1},
+	}), now)
+	added, err := scheduler.policy.Push(later)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(int64(added), later.NQ())
+
+	peeked, execChan := scheduler.setupExecListener(now)
+	s.Equal(later.Order(), peeked.Order())
+	s.NotNil(execChan)
+
+	earlier := newQueuedTask(newMockTask(mockTaskConfig{
+		order: TaskOrder{Timestamp: 10, MessageID: 10, SourceID: 1},
+	}), now.Add(time.Millisecond))
+	added, err = scheduler.policy.Push(earlier)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(int64(added), earlier.NQ())
+
+	peeked, execChan = scheduler.setupExecListener(now.Add(time.Millisecond))
+	s.Equal(earlier.Order(), peeked.Order())
+	s.NotNil(execChan)
+	s.Equal(int64(2), scheduler.GetWaitingTaskTotal())
 }
 
 func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
@@ -445,10 +452,6 @@ func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
 }
 
 func (s *SchedulerSuite) TestExecRechecksDeadlineAfterWaitingForWorker() {
-	paramtable.Init()
-	old := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue("50ms")
-	defer paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue(old)
-
 	scheduler := &scheduler{
 		execChan: make(chan Task),
 		pool:     conc.NewPool[any](1, conc.WithPreAlloc(true)),

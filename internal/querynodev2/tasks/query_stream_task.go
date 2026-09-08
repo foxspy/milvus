@@ -58,6 +58,15 @@ func (t *QueryStreamTask) Context() context.Context {
 	return t.ctx
 }
 
+func (t *QueryStreamTask) Order() scheduler.TaskOrder {
+	base := t.req.GetReq().GetBase()
+	return scheduler.TaskOrder{
+		Timestamp: base.GetTimestamp(),
+		MessageID: base.GetMsgID(),
+		SourceID:  base.GetSourceID(),
+	}
+}
+
 // PreExecute the task, only call once.
 func (t *QueryStreamTask) PreExecute() error {
 	return nil

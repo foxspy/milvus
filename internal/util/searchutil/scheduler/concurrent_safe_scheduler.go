@@ -123,15 +123,12 @@ func (s *scheduler) Stop() {
 // schedule the owned task asynchronously and continuously.
 func (s *scheduler) schedule() {
 	defer s.wg.Done()
-	var task *queuedTask
 	for {
 		s.setupReadyLenMetric()
 
-		var execChan chan Task
-		var execTask Task
-		nq := int64(0)
 		now := time.Now()
-		task, nq, execChan = s.setupExecListener(task, now)
+		task, execChan := s.setupExecListener(now)
+		var execTask Task
 		if task.valid() {
 			execTask = task.Task
 		}
@@ -143,8 +140,8 @@ func (s *scheduler) schedule() {
 				// drain policy maintained task
 				for task.valid() {
 					execChan <- task.Task
-					s.updateWaitingTaskCounter(-1, -nq)
-					task = s.produceExecChan(now)
+					s.removeScheduledTask(task, time.Now())
+					task, execChan = s.setupExecListener(time.Now())
 				}
 				log.Info("all task put into exeChan, schedule worker exit")
 				close(s.execChan)
@@ -154,11 +151,11 @@ func (s *scheduler) schedule() {
 			// And consume recv chan as much as possible.
 			s.consumeRecvChan(req, maxReceiveChanBatchConsumeNum, now)
 		case execChan <- execTask:
-			// Task sent, drop the ownership of sent task.
-			// Update waiting task counter.
-			s.updateWaitingTaskCounter(-1, -nq)
+			// Keep the task in the ordered policy until the executor accepts it,
+			// so an earlier Proxy request can still displace it while waiting.
+			s.removeScheduledTask(task, time.Now())
 			// And produce new task into execChan as much as possible.
-			task = s.produceExecChan(now)
+			s.produceExecChan()
 		}
 	}
 }
@@ -190,15 +187,13 @@ func (s *scheduler) consumeRecvChan(req addTaskReq, limit int, now time.Time) {
 // HandleAddTaskRequest handle a add task request.
 // Return true if the process can be continued.
 func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, now time.Time) bool {
-	deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
-	deadlineErr := taskDeadlineError(req.task, now, deadlineAdvance)
-	if deadlineErr == nil && maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
+	if maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
 		s.cleanupExpiredTasks(now)
 	}
 
-	if deadlineErr != nil {
-		log.Warn("task canceled or too close to deadline before enqueue", zap.Error(deadlineErr))
-		req.err <- deadlineErr
+	if err := req.task.Context().Err(); err != nil {
+		log.Warn("task canceled before enqueue", zap.Error(err))
+		req.err <- err
 	} else if maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
 		err := merr.WrapErrTooManyRequests(
 			int32(maxWaitTaskNum),
@@ -220,26 +215,20 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 	return maxWaitTaskNum <= 0 || s.GetWaitingTaskTotal() < maxWaitTaskNum
 }
 
-// produceExecChan produce task from scheduler into exec chan as much as possible
-func (s *scheduler) produceExecChan(now time.Time) *queuedTask {
-	var task *queuedTask
+// produceExecChan produces tasks from scheduler into exec chan as much as possible.
+func (s *scheduler) produceExecChan() {
 	for {
-		var execChan chan Task
+		task, execChan := s.setupExecListener(time.Now())
 		var execTask Task
-		nq := int64(0)
-		task, nq, execChan = s.setupExecListener(task, now)
 		if task.valid() {
 			execTask = task.Task
 		}
 
 		select {
 		case execChan <- execTask:
-			// Update waiting task counter.
-			s.updateWaitingTaskCounter(-1, -nq)
-			// Task sent, drop the ownership of sent task.
-			task = nil
+			s.removeScheduledTask(task, time.Now())
 		default:
-			return task
+			return
 		}
 	}
 }
@@ -254,10 +243,9 @@ func (s *scheduler) exec() {
 			log.Info("scheduler execChan closed, worker exit")
 			return
 		}
-		// Skip this task if it is canceled or too close to its deadline.
-		deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
-		if err := taskDeadlineError(t, time.Now(), deadlineAdvance); err != nil {
-			log.Warn("task canceled or too close to deadline before executing", zap.Error(err))
+		// Skip this task if task is canceled.
+		if err := t.Context().Err(); err != nil {
+			log.Warn("task canceled before executing", zap.Error(err))
 			t.Done(err)
 			continue
 		}
@@ -270,9 +258,8 @@ func (s *scheduler) exec() {
 		s.getPool(t).Submit(func() (any, error) {
 			// Submit blocks while the pool is full, so the task may expire after
 			// the scheduler's first check and before a worker actually starts it.
-			deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
-			if err := taskDeadlineError(t, time.Now(), deadlineAdvance); err != nil {
-				log.Warn("task canceled or too close to deadline after waiting for executor", zap.Error(err))
+			if err := t.Context().Err(); err != nil {
+				log.Warn("task canceled after waiting for executor", zap.Error(err))
 				t.Done(err)
 				return nil, err
 			}
@@ -317,35 +304,33 @@ func readTaskExecuteOutcome(err error) string {
 	return metrics.FailLabel
 }
 
-// setupExecListener setup the execChan and next task to run.
-func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time) (*queuedTask, int64, chan Task) {
-	var execChan chan Task
-	nq := int64(0)
-	if !lastWaitingTask.valid() {
-		// No task is waiting to send to execChan, schedule a new one from queue.
-		for {
-			lastWaitingTask = s.policy.Pop(now)
-			if !lastWaitingTask.valid() {
-				break
-			}
-			if err := lastWaitingTask.Context().Err(); err != nil {
-				s.updateWaitingTaskCounter(-1, -lastWaitingTask.NQ())
-				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
-				lastWaitingTask.Done(err)
-				lastWaitingTask = nil
-				continue
-			}
-			s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeScheduled)
-			break
+// setupExecListener sets up the execChan and peeks the next task to run. The
+// task remains owned by the policy until execChan accepts it.
+func (s *scheduler) setupExecListener(now time.Time) (*queuedTask, chan Task) {
+	for {
+		task := s.policy.Peek(now)
+		if !task.valid() {
+			return nil, nil
 		}
+		if err := task.Context().Err(); err != nil {
+			removed := s.policy.Pop(now)
+			s.updateWaitingTaskCounter(-1, -removed.NQ())
+			s.recordReadTaskQueueDuration(removed, now, readTaskQueueOutcomeExpired)
+			removed.Done(err)
+			continue
+		}
+		return task, s.execChan
 	}
-	if lastWaitingTask.valid() {
-		// Try to sent task to execChan if there is a task ready to run.
-		execChan = s.execChan
-		nq = lastWaitingTask.NQ()
-	}
+}
 
-	return lastWaitingTask, nq, execChan
+func (s *scheduler) removeScheduledTask(expected *queuedTask, now time.Time) {
+	expectedOrder := expected.Order()
+	removed := s.policy.Pop(now)
+	if !removed.valid() || removed.Order() != expectedOrder {
+		panic("scheduler policy returned a different task after Peek")
+	}
+	s.updateWaitingTaskCounter(-1, -removed.NQ())
+	s.recordReadTaskQueueDuration(removed, now, readTaskQueueOutcomeScheduled)
 }
 
 func (s *scheduler) cleanupExpiredTasks(now time.Time) {

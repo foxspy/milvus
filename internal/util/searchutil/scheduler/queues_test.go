@@ -295,3 +295,16 @@ func TestFairPollingTaskQueue(t *testing.T) {
 	assert.True(t, q.tryMergeWithOtherGroup(username, newQueuedTask(task, time.Now()), int64(n/userN)+1, 0, 0))
 	assert.Equal(t, 0, q.groupLen(username))
 }
+
+func TestFairPollingTaskQueuePeekDoesNotAdvanceCheckpoint(t *testing.T) {
+	q := newFairPollingTaskQueue()
+	first := newMockTask(mockTaskConfig{username: "first"})
+	second := newMockTask(mockTaskConfig{username: "second"})
+	q.push(first.Username(), newQueuedTask(first, time.Now()))
+	q.push(second.Username(), newQueuedTask(second, time.Now()))
+
+	assert.Same(t, first, q.peek(time.Minute).Task)
+	assert.Same(t, first, q.peek(time.Minute).Task)
+	assert.Same(t, first, q.pop(time.Minute).Task)
+	assert.Same(t, second, q.peek(time.Minute).Task)
+}

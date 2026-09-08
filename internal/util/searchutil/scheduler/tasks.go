@@ -12,6 +12,27 @@ const (
 	schedulePolicyNameUserTaskPolling = "user-task-polling"
 )
 
+// TaskOrder is the global order assigned by Proxy before a read request is
+// fanned out to QueryNodes. Every sub-task of one request carries the same
+// order, so independently receiving QueryNodes can make the same scheduling
+// decision for tasks that are still waiting in their queues.
+type TaskOrder struct {
+	Timestamp uint64
+	MessageID int64
+	SourceID  int64
+}
+
+// Before reports whether o must be scheduled before other.
+func (o TaskOrder) Before(other TaskOrder) bool {
+	if o.Timestamp != other.Timestamp {
+		return o.Timestamp < other.Timestamp
+	}
+	if o.MessageID != other.MessageID {
+		return o.MessageID < other.MessageID
+	}
+	return o.SourceID < other.SourceID
+}
+
 // NewScheduler create a scheduler by policyName.
 func NewScheduler(policyName string) Scheduler {
 	switch policyName {
@@ -75,6 +96,10 @@ type schedulePolicy interface {
 	// Pop get the task next ready to run.
 	Pop(now time.Time) *queuedTask
 
+	// Peek gets the next ready task without removing it. This lets the policy
+	// reorder the task while the executor is not yet ready to receive it.
+	Peek(now time.Time) *queuedTask
+
 	Len() int
 }
 
@@ -120,18 +145,6 @@ func cleanupTaskError(task *queuedTask) error {
 	return context.DeadlineExceeded
 }
 
-func taskDeadlineError(task Task, now time.Time, deadlineAdvance time.Duration) error {
-	if err := task.Context().Err(); err != nil {
-		return err
-	}
-
-	deadline, ok := task.Context().Deadline()
-	if ok && !now.Add(deadlineAdvance).Before(deadline) {
-		return context.DeadlineExceeded
-	}
-	return nil
-}
-
 // MergeTask is a Task which can be merged with other task
 type MergeTask interface {
 	Task
@@ -147,6 +160,9 @@ type MergeTask interface {
 // A task is execute unit of scheduler.
 type Task interface {
 	Context() context.Context
+
+	// Order returns the Proxy-assigned global order of the original request.
+	Order() TaskOrder
 
 	// Return the username which task is belong to.
 	// Return "" if the task do not contain any user info.

@@ -11,7 +11,9 @@ var _ schedulePolicy = &fifoPolicy{}
 // newFIFOPolicy create a new fifo schedule policy.
 func newFIFOPolicy() schedulePolicy {
 	return &fifoPolicy{
-		queue: newMergeTaskQueue(""),
+		queue: newMergeTaskQueueWithOrder("", func(left, right *queuedTask) bool {
+			return left.Order().Before(right.Order())
+		}),
 	}
 }
 
@@ -46,6 +48,10 @@ func (p *fifoPolicy) Push(task *queuedTask) (int, error) {
 // Pop get the task next ready to run.
 func (p *fifoPolicy) Pop(now time.Time) *queuedTask {
 	return p.queue.pop()
+}
+
+func (p *fifoPolicy) Peek(now time.Time) *queuedTask {
+	return p.queue.front()
 }
 
 // Len get ready task counts.
