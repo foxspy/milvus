@@ -37,6 +37,13 @@ func dynamicDeadlineEnabled(window time.Duration, ratio float64) bool {
 	return window > 0 && ratio > 0 && ratio <= 1
 }
 
+func (w *executionLatencyWindow) reset() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.samples = nil
+	w.lower, w.upper = nil, nil
+}
+
 func (w *executionLatencyWindow) timeout(window time.Duration, ratio float64) (time.Duration, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

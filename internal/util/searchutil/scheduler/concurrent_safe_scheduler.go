@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
+	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
@@ -31,7 +33,7 @@ const (
 func newScheduler(policy schedulePolicy) Scheduler {
 	maxReadConcurrency := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt()
 	log.Info("query node use concurrent safe scheduler", zap.Int("max_concurrency", maxReadConcurrency))
-	return &scheduler{
+	s := &scheduler{
 		policy:           policy,
 		receiveChan:      make(chan addTaskReq),
 		execChan:         make(chan Task),
@@ -40,6 +42,8 @@ func newScheduler(policy schedulePolicy) Scheduler {
 		schedulerCounter: schedulerCounter{},
 		lifetime:         lifetime.NewLifetime(lifetime.Initializing),
 	}
+	s.watchDynamicDeadline()
+	return s
 }
 
 type addTaskReq struct {
@@ -57,6 +61,11 @@ type scheduler struct {
 
 	searchLatencies executionLatencyWindow
 	queryLatencies  executionLatencyWindow
+	// Serialize switch transitions with deadline decisions and sample recording.
+	deadlineMu         sync.RWMutex
+	deadlineEnabled    bool
+	deadlineGeneration uint64
+	deadlineHandler    config.EventHandler
 
 	// wg is the waitgroup for internal worker goroutine
 	wg sync.WaitGroup
@@ -121,6 +130,39 @@ func (s *scheduler) Stop() {
 	if s.gpuPool != nil {
 		s.gpuPool.Release()
 	}
+	s.unwatchDynamicDeadline()
+}
+
+func (s *scheduler) watchDynamicDeadline() {
+	item := &paramtable.Get().QueryNodeCfg.EnableDynamicDeadline
+	update := func() {
+		s.deadlineMu.Lock()
+		defer s.deadlineMu.Unlock()
+		// Read the effective value directly: conversion caches can still hold
+		// the old value until all config event handlers have run.
+		enabled, _ := strconv.ParseBool(item.GetValue())
+		if s.deadlineEnabled != enabled {
+			s.deadlineEnabled = enabled
+			s.deadlineGeneration++
+			s.searchLatencies.reset()
+			s.queryLatencies.reset()
+		}
+	}
+	s.deadlineHandler = config.NewHandler(fmt.Sprintf("qn.scheduler.dynamicDeadline.%p", s), func(*config.Event) { update() })
+	paramtable.Get().Watch(item.Key, s.deadlineHandler)
+	update()
+}
+
+func (s *scheduler) unwatchDynamicDeadline() {
+	if s.deadlineHandler != nil {
+		paramtable.Get().Unwatch(paramtable.Get().QueryNodeCfg.EnableDynamicDeadline.Key, s.deadlineHandler)
+	}
+	s.deadlineMu.Lock()
+	defer s.deadlineMu.Unlock()
+	s.deadlineEnabled = false
+	s.deadlineGeneration++
+	s.searchLatencies.reset()
+	s.queryLatencies.reset()
 }
 
 // schedule the owned task asynchronously and continuously.
@@ -291,14 +333,21 @@ func (s *scheduler) exec() {
 // executeTask applies a deadline only after a pool worker is available. The
 // original task context remains unchanged for admission and queue ordering.
 func (s *scheduler) executeTask(t Task) (time.Duration, error) {
-	cfg := &paramtable.Get().QueryNodeCfg
-	window := cfg.SchedulerTimeWindow.GetAsDurationByParse()
-	ratio := cfg.SuccessLatencyRatio.GetAsFloat()
 	latencies := &s.queryLatencies
 	if t.IsSearch() {
 		latencies = &s.searchLatencies
 	}
-	timeout, ok := latencies.timeout(window, ratio)
+	var window, timeout time.Duration
+	var ratio float64
+	var ok bool
+	s.deadlineMu.RLock()
+	enabled, generation := s.deadlineEnabled, s.deadlineGeneration
+	if enabled {
+		cfg := &paramtable.Get().QueryNodeCfg
+		window = cfg.SchedulerTimeWindow.GetAsDurationByParse()
+		ratio = cfg.SuccessLatencyRatio.GetAsFloat()
+		timeout, ok = latencies.timeout(window, ratio)
+	}
 	ctx := t.Context()
 	executeStart := time.Now()
 	if ok {
@@ -306,10 +355,16 @@ func (s *scheduler) executeTask(t Task) (time.Duration, error) {
 		ctx, cancel = context.WithDeadline(ctx, executeStart.Add(timeout))
 		defer cancel()
 	}
+	s.deadlineMu.RUnlock()
 	err := t.Execute(ctx)
 	executeDuration := time.Since(executeStart)
-	if err == nil && ctx.Err() == nil {
-		latencies.observe(executeDuration, window, ratio)
+	if enabled && err == nil && ctx.Err() == nil {
+		s.deadlineMu.RLock()
+		// A task from before a switch transition must not refill fresh windows.
+		if s.deadlineEnabled && s.deadlineGeneration == generation {
+			latencies.observe(executeDuration, window, ratio)
+		}
+		s.deadlineMu.RUnlock()
 	}
 	return executeDuration, err
 }

@@ -564,8 +564,9 @@ queryNode:
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
     unsolvedQueueSize: 1024
+    enableDynamicDeadline: false # Hot-updatable switch. Enabling starts fresh success-latency sampling; disabling clears search/query samples. Already assigned execution deadlines remain in effect.
     schedulerTimeWindow: 15s # Rolling window of successful Execute durations, separately for search and query. Non-positive disables dynamic deadlines; no samples means no decision.
-    successLatencyRatio: 0 # Execution timeout quantile: 0.9 means P90, (0, 1] enables it. Measured from Execute start; an earlier client deadline takes precedence. 0 disables it.
+    successLatencyRatio: 0.9 # Execution timeout quantile when enableDynamicDeadline is true: 0.9 means P90. Measured from Execute start; an earlier client deadline takes precedence. Values outside (0, 1] disable it.
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.

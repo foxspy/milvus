@@ -35,6 +35,7 @@ func configureDynamicDeadline(t *testing.T) {
 		item  *paramtable.ParamItem
 		value string
 	}{
+		{&params.QueryNodeCfg.EnableDynamicDeadline, "true"},
 		{&params.QueryNodeCfg.SchedulerTimeWindow, "15s"},
 		{&params.QueryNodeCfg.SuccessLatencyRatio, "0.9"},
 	} {
@@ -44,9 +45,16 @@ func configureDynamicDeadline(t *testing.T) {
 	}
 }
 
+func newDynamicDeadlineTestScheduler(t *testing.T) *scheduler {
+	s := &scheduler{}
+	s.watchDynamicDeadline()
+	t.Cleanup(s.unwatchDynamicDeadline)
+	return s
+}
+
 func TestDynamicDeadlineNoSamplesAndSuccessfulSamples(t *testing.T) {
 	configureDynamicDeadline(t)
-	s := &scheduler{}
+	s := newDynamicDeadlineTestScheduler(t)
 	parent := context.WithValue(context.Background(), struct{}{}, "request value")
 	task := newDeadlineTestTask(parent, true, func(ctx context.Context) error {
 		require.Same(t, parent, ctx, "without samples the context must be passed through")
@@ -69,7 +77,7 @@ func TestDynamicDeadlineNoSamplesAndSuccessfulSamples(t *testing.T) {
 
 func TestDynamicDeadlineSeparatesSearchAndQuery(t *testing.T) {
 	configureDynamicDeadline(t)
-	s := &scheduler{}
+	s := newDynamicDeadlineTestScheduler(t)
 	// Different kinds use different budgets, without splitting by other factors.
 	s.searchLatencies.observe(time.Second, 15*time.Second, 0.9)
 	s.queryLatencies.observe(10*time.Second, 15*time.Second, 0.9)
@@ -128,7 +136,7 @@ func TestDynamicDeadlineCancelsRunningTask(t *testing.T) {
 
 func TestDynamicDeadlinePreservesEarlierParentDeadline(t *testing.T) {
 	configureDynamicDeadline(t)
-	s := &scheduler{}
+	s := newDynamicDeadlineTestScheduler(t)
 	s.searchLatencies.observe(time.Second, 15*time.Second, 0.9)
 	parent, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
@@ -147,7 +155,7 @@ func TestDynamicDeadlinePreservesEarlierParentDeadline(t *testing.T) {
 
 func TestDynamicDeadlineDisabledAndExpiredWindow(t *testing.T) {
 	configureDynamicDeadline(t)
-	s := &scheduler{}
+	s := newDynamicDeadlineTestScheduler(t)
 	parent := context.Background()
 	task := newDeadlineTestTask(parent, true, func(ctx context.Context) error {
 		require.True(t, parent == ctx)
@@ -172,6 +180,8 @@ func TestDynamicDeadlineDisabledAndExpiredWindow(t *testing.T) {
 func TestDynamicDeadlineStartsAfterWaitingForWorker(t *testing.T) {
 	configureDynamicDeadline(t)
 	s := &scheduler{execChan: make(chan Task), pool: conc.NewPool[any](1, conc.WithPreAlloc(true))}
+	s.watchDynamicDeadline()
+	t.Cleanup(s.unwatchDynamicDeadline)
 	s.searchLatencies.observe(20*time.Millisecond, 15*time.Second, 0.9)
 	s.wg.Add(1)
 	go s.exec()
@@ -205,4 +215,109 @@ func TestDynamicDeadlineStartsAfterWaitingForWorker(t *testing.T) {
 	require.NoError(t, second.Wait())
 	require.Greater(t, workerStarted.Sub(submitted), 20*time.Millisecond)
 	require.True(t, deadline.After(workerStarted))
+}
+
+func TestDynamicDeadlineHotSwitch(t *testing.T) {
+	configureDynamicDeadline(t)
+	params := paramtable.Get()
+	key := params.QueryNodeCfg.EnableDynamicDeadline.Key
+	require.NoError(t, params.Save(key, "false"))
+	s := newDynamicDeadlineTestScheduler(t)
+	parent := context.Background()
+	runWithoutDeadline := func(isSearch bool) {
+		task := newDeadlineTestTask(parent, isSearch, func(ctx context.Context) error {
+			require.True(t, parent == ctx)
+			return nil
+		})
+		_, err := s.executeTask(task)
+		require.NoError(t, err)
+	}
+	// A valid P90 and window must not collect samples while the switch is off.
+	runWithoutDeadline(true)
+	runWithoutDeadline(false)
+	require.Empty(t, s.searchLatencies.samples)
+	require.Empty(t, s.queryLatencies.samples)
+
+	require.NoError(t, params.Save(key, "true"))
+	runWithoutDeadline(true)
+	runWithoutDeadline(false)
+	require.Len(t, s.searchLatencies.samples, 1)
+	require.Len(t, s.queryLatencies.samples, 1)
+	for _, isSearch := range []bool{true, false} {
+		failure := errors.New("do not add another sample")
+		task := newDeadlineTestTask(parent, isSearch, func(ctx context.Context) error {
+			_, ok := ctx.Deadline()
+			require.True(t, ok, "an enabled scheduler with samples assigns a deadline")
+			return failure
+		})
+		_, err := s.executeTask(task)
+		require.ErrorIs(t, err, failure)
+	}
+
+	// Clear immediately, including a task kind that receives no further work.
+	require.NoError(t, params.Save(key, "false"))
+	require.Empty(t, s.searchLatencies.samples)
+	require.Empty(t, s.queryLatencies.samples)
+	// Even a quick off/on transition without intervening requests starts fresh.
+	require.NoError(t, params.Save(key, "true"))
+	runWithoutDeadline(true)
+	runWithoutDeadline(false)
+	require.Len(t, s.searchLatencies.samples, 1)
+	require.Len(t, s.queryLatencies.samples, 1)
+}
+
+func TestDynamicDeadlineSwitchExcludesInFlightSamples(t *testing.T) {
+	configureDynamicDeadline(t)
+	params := paramtable.Get()
+	key := params.QueryNodeCfg.EnableDynamicDeadline.Key
+	for _, tc := range []struct {
+		name    string
+		initial string
+		updates []string
+	}{
+		{"disabled execution finishes after enable", "false", []string{"true"}},
+		{"enabled execution finishes after disable", "true", []string{"false"}},
+		{"old execution finishes after re-enable", "true", []string{"false", "true"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, isSearch := range []bool{true, false} {
+				require.NoError(t, params.Save(key, tc.initial))
+				s := newDynamicDeadlineTestScheduler(t)
+				started := make(chan struct{})
+				release := make(chan struct{})
+				task := newDeadlineTestTask(context.Background(), isSearch, func(context.Context) error {
+					close(started)
+					<-release
+					return nil
+				})
+				done := make(chan error, 1)
+				go func() {
+					_, err := s.executeTask(task)
+					done <- err
+				}()
+				<-started
+				for _, value := range tc.updates {
+					require.NoError(t, params.Save(key, value))
+				}
+				close(release)
+				require.NoError(t, <-done)
+				require.Empty(t, s.searchLatencies.samples)
+				require.Empty(t, s.queryLatencies.samples)
+			}
+		})
+	}
+}
+
+func TestDynamicDeadlineWatcherCleanup(t *testing.T) {
+	configureDynamicDeadline(t)
+	s := newScheduler(newFIFOPolicy()).(*scheduler)
+	other := newScheduler(newFIFOPolicy()).(*scheduler)
+	defer other.Stop()
+	s.Stop()
+	params := paramtable.Get()
+	key := params.QueryNodeCfg.EnableDynamicDeadline.Key
+	require.NoError(t, params.Save(key, "false"))
+	require.NoError(t, params.Save(key, "true"))
+	require.False(t, s.deadlineEnabled, "a stopped scheduler must unregister its watcher")
+	require.True(t, other.deadlineEnabled, "stopping one scheduler must preserve other watchers")
 }

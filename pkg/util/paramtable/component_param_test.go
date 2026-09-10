@@ -874,10 +874,17 @@ func TestQueryNodeDynamicDeadlineConfig(t *testing.T) {
 	params := Get()
 	window := &params.QueryNodeCfg.SchedulerTimeWindow
 	ratio := &params.QueryNodeCfg.SuccessLatencyRatio
+	enabled := &params.QueryNodeCfg.EnableDynamicDeadline
 	defer params.Reset(window.Key)
 	defer params.Reset(ratio.Key)
+	defer params.Reset(enabled.Key)
 	assert.Equal(t, 15*time.Second, window.GetAsDurationByParse())
-	assert.Zero(t, ratio.GetAsFloat())
+	assert.Equal(t, 0.9, ratio.GetAsFloat())
+	assert.False(t, enabled.GetAsBool())
+	assert.NoError(t, params.Save(enabled.Key, "true"))
+	assert.True(t, enabled.GetAsBool())
+	assert.NoError(t, params.Save(enabled.Key, "false"))
+	assert.False(t, enabled.GetAsBool())
 	assert.NoError(t, params.Save(window.Key, "30s"))
 	assert.Equal(t, 30*time.Second, window.GetAsDurationByParse())
 	assert.NoError(t, params.Save(window.Key, "0"))

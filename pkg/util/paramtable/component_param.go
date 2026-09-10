@@ -3534,6 +3534,7 @@ type queryNodeConfig struct {
 	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
 	MaxReadConcurrency           ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
+	EnableDynamicDeadline        ParamItem `refreshable:"true"`
 	SchedulerTimeWindow          ParamItem `refreshable:"true"`
 	SuccessLatencyRatio          ParamItem `refreshable:"true"`
 	MaxGroupNQ                   ParamItem `refreshable:"true"`
@@ -4529,6 +4530,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
 
+	p.EnableDynamicDeadline = ParamItem{
+		Key:          "queryNode.scheduler.enableDynamicDeadline",
+		Version:      "2.6.24",
+		DefaultValue: "false",
+		Doc:          "Enable successful execution latency sampling and dynamic deadlines for new read task executions. Supports hot updates. Disabling clears both search and query samples; re-enabling starts fresh. Deadlines already assigned to running tasks remain in effect.",
+		Export:       true,
+	}
+	p.EnableDynamicDeadline.Init(base.mgr)
+
 	p.SchedulerTimeWindow = ParamItem{
 		Key:          "queryNode.scheduler.schedulerTimeWindow",
 		Version:      "2.6.24",
@@ -4541,7 +4551,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.SuccessLatencyRatio = ParamItem{
 		Key:          "queryNode.scheduler.successLatencyRatio",
 		Version:      "2.6.24",
-		DefaultValue: "0",
+		DefaultValue: "0.9",
 		Formatter: func(v string) string {
 			ratio, err := strconv.ParseFloat(v, 64)
 			if err != nil || !(ratio > 0 && ratio <= 1) {
