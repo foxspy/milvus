@@ -54,6 +54,10 @@ func (t *QueryStreamTask) IsGpuIndex() bool {
 	return false
 }
 
+func (t *QueryStreamTask) IsSearch() bool {
+	return false
+}
+
 func (t *QueryStreamTask) Context() context.Context {
 	return t.ctx
 }
@@ -70,7 +74,11 @@ func (t *QueryStreamTask) PreExecute() error {
 	return nil
 }
 
-func (t *QueryStreamTask) Execute() error {
+func (t *QueryStreamTask) Execute(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	retrievePlan, err := segcore.NewRetrievePlan(
 		t.collection.GetCCollection(),
 		t.req.Req.GetSerializedExprPlan(),
@@ -87,7 +95,7 @@ func (t *QueryStreamTask) Execute() error {
 	srv := streamrpc.NewResultCacheServer(t.srv, t.minMsgSize, t.maxMsgSize)
 	defer srv.Flush()
 
-	segments, err := segments.RetrieveStream(t.ctx, t.segmentManager, retrievePlan, t.req, srv)
+	segments, err := segments.RetrieveStream(ctx, t.segmentManager, retrievePlan, t.req, srv)
 	defer t.segmentManager.Segment.Unpin(segments)
 	if err != nil {
 		return err

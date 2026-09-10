@@ -3534,6 +3534,8 @@ type queryNodeConfig struct {
 	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
 	MaxReadConcurrency           ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
+	SchedulerTimeWindow          ParamItem `refreshable:"true"`
+	SuccessLatencyRatio          ParamItem `refreshable:"true"`
 	MaxGroupNQ                   ParamItem `refreshable:"true"`
 	NQMergeRatio                 ParamItem `refreshable:"true"`
 	MaxDeadlineMergeGap          ParamItem `refreshable:"true"`
@@ -4526,6 +4528,31 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
+
+	p.SchedulerTimeWindow = ParamItem{
+		Key:          "queryNode.scheduler.schedulerTimeWindow",
+		Version:      "2.6.24",
+		DefaultValue: "15s",
+		Doc:          "Rolling time window of successful Execute durations for dynamic deadlines, maintained separately for search and query. Use a duration string such as 15s. A non-positive duration disables dynamic deadlines; an empty window makes no deadline decision.",
+		Export:       true,
+	}
+	p.SchedulerTimeWindow.Init(base.mgr)
+
+	p.SuccessLatencyRatio = ParamItem{
+		Key:          "queryNode.scheduler.successLatencyRatio",
+		Version:      "2.6.24",
+		DefaultValue: "0",
+		Formatter: func(v string) string {
+			ratio, err := strconv.ParseFloat(v, 64)
+			if err != nil || !(ratio > 0 && ratio <= 1) {
+				return "0"
+			}
+			return v
+		},
+		Doc:    "Successful execution latency quantile used as the timeout from Execute start: 0.9 selects P90. Values outside (0, 1] disable dynamic deadlines. An earlier client deadline always takes precedence.",
+		Export: true,
+	}
+	p.SuccessLatencyRatio.Init(base.mgr)
 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",

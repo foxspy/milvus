@@ -55,6 +55,9 @@ type scheduler struct {
 	pool        *conc.Pool[any]
 	gpuPool     *conc.Pool[any]
 
+	searchLatencies executionLatencyWindow
+	queryLatencies  executionLatencyWindow
+
 	// wg is the waitgroup for internal worker goroutine
 	wg sync.WaitGroup
 	// lifetime controls scheduler State & make sure all requests accepted will be processed
@@ -268,12 +271,11 @@ func (s *scheduler) exec() {
 			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 			collector.Counter.Inc(metricsinfo.ExecuteQueueType)
 
-			executeStart := time.Now()
-			err := t.Execute()
+			executeDuration, err := s.executeTask(t)
 			metrics.QueryNodeReadTaskExecuteDuration.WithLabelValues(
 				paramtable.GetStringNodeID(),
 				readTaskExecuteOutcome(err),
-			).Observe(float64(time.Since(executeStart).Microseconds()) / 1000.0)
+			).Observe(float64(executeDuration.Microseconds()) / 1000.0)
 
 			// Update all metric after task finished.
 			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Dec()
@@ -284,6 +286,32 @@ func (s *scheduler) exec() {
 			return nil, err
 		})
 	}
+}
+
+// executeTask applies a deadline only after a pool worker is available. The
+// original task context remains unchanged for admission and queue ordering.
+func (s *scheduler) executeTask(t Task) (time.Duration, error) {
+	cfg := &paramtable.Get().QueryNodeCfg
+	window := cfg.SchedulerTimeWindow.GetAsDurationByParse()
+	ratio := cfg.SuccessLatencyRatio.GetAsFloat()
+	latencies := &s.queryLatencies
+	if t.IsSearch() {
+		latencies = &s.searchLatencies
+	}
+	timeout, ok := latencies.timeout(window, ratio)
+	ctx := t.Context()
+	executeStart := time.Now()
+	if ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, executeStart.Add(timeout))
+		defer cancel()
+	}
+	err := t.Execute(ctx)
+	executeDuration := time.Since(executeStart)
+	if err == nil && ctx.Err() == nil {
+		latencies.observe(executeDuration, window, ratio)
+	}
+	return executeDuration, err
 }
 
 func (s *scheduler) getPool(t Task) *conc.Pool[any] {

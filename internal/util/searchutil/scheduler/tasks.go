@@ -151,6 +151,9 @@ type MergeTask interface {
 type Task interface {
 	Context() context.Context
 
+	// IsSearch distinguishes search from query for execution latency statistics.
+	IsSearch() bool
+
 	// Order returns the Proxy-assigned timestamp of the original request.
 	Order() TaskOrder
 
@@ -164,8 +167,8 @@ type Task interface {
 	// PreExecute the task, only call once.
 	PreExecute() error
 
-	// Execute the task, only call once.
-	Execute() error
+	// Execute the task with the scheduler's execution context, only call once.
+	Execute(ctx context.Context) error
 
 	// Done notify the task finished.
 	Done(err error)

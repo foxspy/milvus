@@ -98,6 +98,10 @@ func (t *SearchTask) IsGpuIndex() bool {
 	return t.collection.IsGpuIndex()
 }
 
+func (t *SearchTask) IsSearch() bool {
+	return true
+}
+
 func (t *SearchTask) Context() context.Context {
 	return t.ctx
 }
@@ -143,8 +147,12 @@ func (t *SearchTask) PreExecute() error {
 	return nil
 }
 
-func (t *SearchTask) Execute() error {
-	log := log.Ctx(t.ctx).With(
+func (t *SearchTask) Execute(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", t.collection.ID()),
 		zap.String("shard", t.req.GetDmlChannels()[0]),
 	)
@@ -152,7 +160,7 @@ func (t *SearchTask) Execute() error {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
 	}
-	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "SearchTask")
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "SearchTask")
 
 	req := t.req
 	err := t.combinePlaceHolderGroups()
@@ -171,7 +179,7 @@ func (t *SearchTask) Execute() error {
 	)
 	if req.GetScope() == querypb.DataScope_Historical {
 		results, searchedSegments, err = segments.SearchHistorical(
-			t.ctx,
+			ctx,
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
@@ -180,7 +188,7 @@ func (t *SearchTask) Execute() error {
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
 		results, searchedSegments, err = segments.SearchStreaming(
-			t.ctx,
+			ctx,
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
@@ -230,7 +238,7 @@ func (t *SearchTask) Execute() error {
 
 	tr.RecordSpan()
 	blobs, err := segcore.ReduceSearchResultsAndFillData(
-		t.ctx,
+		ctx,
 		searchReq.Plan(),
 		results,
 		int64(len(results)),
@@ -265,7 +273,7 @@ func (t *SearchTask) Execute() error {
 	// Phase 1: build all results.
 	var phaseErr error
 	for i := range t.originNqs {
-		blob, cost, err := segcore.GetSearchResultDataBlob(t.ctx, blobs, i)
+		blob, cost, err := segcore.GetSearchResultDataBlob(ctx, blobs, i)
 		if err != nil {
 			phaseErr = err
 			break
@@ -484,8 +492,12 @@ func (t *StreamingSearchTask) MergeWith(other scheduler.Task) bool {
 	return false
 }
 
-func (t *StreamingSearchTask) Execute() error {
-	log := log.Ctx(t.ctx).With(
+func (t *StreamingSearchTask) Execute(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", t.collection.ID()),
 		zap.String("shard", t.req.GetDmlChannels()[0]),
 	)
@@ -493,7 +505,7 @@ func (t *StreamingSearchTask) Execute() error {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
 	}
-	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "SearchTask")
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "SearchTask")
 	req := t.req
 	t.combinePlaceHolderGroups()
 	searchReq, err := segcore.NewSearchRequest(t.collection.GetCCollection(), req, t.placeholderGroup)
@@ -507,11 +519,11 @@ func (t *StreamingSearchTask) Execute() error {
 	var relatedDataSize int64
 	if req.GetScope() == querypb.DataScope_Historical {
 		streamReduceFunc := func(result *segments.SearchResult) error {
-			reduceErr := t.streamReduce(t.ctx, searchReq.Plan(), result, t.originNqs, t.originTopks)
+			reduceErr := t.streamReduce(ctx, searchReq.Plan(), result, t.originNqs, t.originTopks)
 			return reduceErr
 		}
 		pinnedSegments, err := segments.SearchHistoricalStreamly(
-			t.ctx,
+			ctx,
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
@@ -524,7 +536,7 @@ func (t *StreamingSearchTask) Execute() error {
 			log.Error("Failed to search sealed segments streamly", zap.Error(err))
 			return err
 		}
-		t.resultBlobs, err = segcore.GetStreamReduceResult(t.ctx, t.streamReducer)
+		t.resultBlobs, err = segcore.GetStreamReduceResult(ctx, t.streamReducer)
 		defer segcore.DeleteSearchResultDataBlobs(t.resultBlobs)
 		if err != nil {
 			log.Error("Failed to get stream-reduced search result")
@@ -535,7 +547,7 @@ func (t *StreamingSearchTask) Execute() error {
 		}, 0)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
 		results, pinnedSegments, err := segments.SearchStreaming(
-			t.ctx,
+			ctx,
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
@@ -552,7 +564,7 @@ func (t *StreamingSearchTask) Execute() error {
 		}
 		tr.RecordSpan()
 		t.resultBlobs, err = segcore.ReduceSearchResultsAndFillData(
-			t.ctx,
+			ctx,
 			searchReq.Plan(),
 			results,
 			int64(len(results)),
@@ -577,7 +589,7 @@ func (t *StreamingSearchTask) Execute() error {
 
 	// 2. reorganize blobs to original search request
 	for i := range t.originNqs {
-		blob, cost, err := segcore.GetSearchResultDataBlob(t.ctx, t.resultBlobs, i)
+		blob, cost, err := segcore.GetSearchResultDataBlob(ctx, t.resultBlobs, i)
 		if err != nil {
 			return err
 		}

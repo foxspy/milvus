@@ -869,6 +869,32 @@ func TestComponentParam(t *testing.T) {
 	})
 }
 
+func TestQueryNodeDynamicDeadlineConfig(t *testing.T) {
+	Init()
+	params := Get()
+	window := &params.QueryNodeCfg.SchedulerTimeWindow
+	ratio := &params.QueryNodeCfg.SuccessLatencyRatio
+	defer params.Reset(window.Key)
+	defer params.Reset(ratio.Key)
+	assert.Equal(t, 15*time.Second, window.GetAsDurationByParse())
+	assert.Zero(t, ratio.GetAsFloat())
+	assert.NoError(t, params.Save(window.Key, "30s"))
+	assert.Equal(t, 30*time.Second, window.GetAsDurationByParse())
+	assert.NoError(t, params.Save(window.Key, "0"))
+	assert.Zero(t, window.GetAsDurationByParse())
+	assert.NoError(t, params.Save(window.Key, "invalid"))
+	assert.Equal(t, 15*time.Second, window.GetAsDurationByParse())
+	for _, value := range []string{"0.9", "1"} {
+		assert.NoError(t, params.Save(ratio.Key, value))
+		assert.Greater(t, ratio.GetAsFloat(), 0.0)
+		assert.LessOrEqual(t, ratio.GetAsFloat(), 1.0)
+	}
+	for _, value := range []string{"0", "-1", "1.1", "NaN", "+Inf", "invalid"} {
+		assert.NoError(t, params.Save(ratio.Key, value))
+		assert.Zero(t, ratio.GetAsFloat())
+	}
+}
+
 func TestForbiddenItem(t *testing.T) {
 	Init()
 	params := Get()

@@ -17,6 +17,7 @@ var (
 type mockTaskConfig struct {
 	ctx         context.Context
 	order       TaskOrder
+	isSearch    bool
 	mergeAble   bool
 	nq          int64
 	username    string
@@ -37,6 +38,7 @@ func newMockTask(c mockTaskConfig) Task {
 	return &MockTask{
 		ctx:         c.ctx,
 		order:       c.order,
+		isSearch:    c.isSearch,
 		executeCost: c.executeCost,
 		notifier:    make(chan error, 1),
 		mergeAble:   c.mergeAble,
@@ -51,6 +53,7 @@ func newMockTask(c mockTaskConfig) Task {
 type MockTask struct {
 	ctx         context.Context
 	order       TaskOrder
+	isSearch    bool
 	executeCost time.Duration
 	notifier    chan error
 	mergeAble   bool
@@ -70,6 +73,10 @@ func (t *MockTask) Username() string {
 	return t.username
 }
 
+func (t *MockTask) IsSearch() bool {
+	return t.isSearch
+}
+
 func (t *MockTask) IsGpuIndex() bool {
 	return false
 }
@@ -82,11 +89,11 @@ func (t *MockTask) PreExecute() error {
 	return nil
 }
 
-func (t *MockTask) Execute() error {
+func (t *MockTask) Execute(ctx context.Context) error {
 	var err error
 	time.Sleep(t.executeCost)
 	if t.execution != nil {
-		err = t.execution(t.ctx)
+		err = t.execution(ctx)
 	}
 	return err
 }

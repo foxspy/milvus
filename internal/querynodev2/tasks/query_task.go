@@ -69,6 +69,10 @@ func (t *QueryTask) IsGpuIndex() bool {
 	return false
 }
 
+func (t *QueryTask) IsSearch() bool {
+	return false
+}
+
 func (t *QueryTask) Context() context.Context {
 	return t.ctx
 }
@@ -117,11 +121,15 @@ func (t *QueryTask) SearchResult() *internalpb.SearchResults {
 }
 
 // Execute the task, only call once.
-func (t *QueryTask) Execute() error {
+func (t *QueryTask) Execute(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
 	}
-	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "QueryTask")
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "QueryTask")
 
 	retrievePlan, err := segcore.NewRetrievePlan(
 		t.collection.GetCCollection(),
@@ -136,7 +144,7 @@ func (t *QueryTask) Execute() error {
 	}
 	defer retrievePlan.Delete()
 
-	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
+	results, pinnedSegments, err := segments.Retrieve(ctx, t.segmentManager, retrievePlan, t.req)
 	defer t.segmentManager.Segment.Unpin(pinnedSegments)
 	if err != nil {
 		return err
@@ -155,11 +163,11 @@ func (t *QueryTask) Execute() error {
 		reduceResults = append(reduceResults, result.Result)
 		querySegments = append(querySegments, result.Segment)
 	}
-	reducedResult, err := reducer.Reduce(t.ctx, reduceResults, querySegments, retrievePlan)
+	reducedResult, err := reducer.Reduce(ctx, reduceResults, querySegments, retrievePlan)
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
-		contextutil.GetQueryLabel(t.ctx),
+		contextutil.GetQueryLabel(ctx),
 		metrics.ReduceSegments,
 		metrics.BatchReduce).Observe(float64(time.Since(beforeReduce).Microseconds()) / 1000.0)
 	if err != nil {
