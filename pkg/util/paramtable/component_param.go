@@ -4553,7 +4553,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.scheduler.schedulerTimeWindow",
 		Version:      "2.6.24",
 		DefaultValue: "15s",
-		Doc:          "Rolling time window of successful Execute durations for dynamic deadlines, maintained separately for search and query. Use a duration string such as 15s. A non-positive duration disables dynamic deadlines; an empty window makes no deadline decision.",
+		Doc:          "Rolling time window of successful Execute durations, separately for search and query. Samples are grouped by completion time into buckets of at most 1s (shorter for subsecond windows); boundary samples may be discarded up to one bucket early. Hot updates use the new window; expired history is not recovered when growing it. Use a duration string such as 15s. A non-positive duration disables dynamic deadlines; an empty window makes no deadline decision.",
 		Export:       true,
 	}
 	p.SchedulerTimeWindow.Init(base.mgr)
@@ -4569,7 +4569,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 			}
 			return v
 		},
-		Doc:    "Successful execution latency quantile used as the timeout from Execute start: 0.9 selects P90. Values outside (0, 1] disable dynamic deadlines. An earlier client deadline always takes precedence.",
+		Doc:    "Successful execution latency quantile used as the timeout from Execute start: 0.9 selects P90. Uses histogram bucket upper bounds, rounding the selected retained-sample latency up by at most 5%; time-bucket expiration can further change the quantile. Supports hot updates without rebalancing samples. Values outside (0, 1] disable dynamic deadlines. An earlier client deadline always takes precedence.",
 		Export: true,
 	}
 	p.SuccessLatencyRatio.Init(base.mgr)

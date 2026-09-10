@@ -63,15 +63,17 @@ func TestDynamicDeadlineNoSamplesAndSuccessfulSamples(t *testing.T) {
 	})
 	duration, err := s.executeTask(task)
 	require.NoError(t, err)
-	require.Len(t, s.searchLatencies.samples, 1)
-	require.Equal(t, duration, s.searchLatencies.samples[0].duration)
-	require.Empty(t, s.queryLatencies.samples)
+	require.Equal(t, uint64(1), s.searchLatencies.count)
+	estimate, ok := s.searchLatencies.timeout(15*time.Second, 0.9)
+	require.True(t, ok)
+	requireApproximateLatency(t, duration, estimate)
+	require.Zero(t, s.queryLatencies.count)
 	// Failed and canceled executions never enter the success window.
 	for _, failure := range []error{errors.New("execute failed"), context.Canceled, context.DeadlineExceeded} {
 		task.execute = func(context.Context) error { return failure }
 		_, err = s.executeTask(task)
 		require.ErrorIs(t, err, failure)
-		require.Len(t, s.searchLatencies.samples, 1)
+		require.Equal(t, uint64(1), s.searchLatencies.count)
 	}
 }
 
@@ -99,7 +101,7 @@ func TestDynamicDeadlineSeparatesSearchAndQuery(t *testing.T) {
 		after := time.Now()
 		require.ErrorIs(t, err, failure)
 		require.False(t, deadline.Before(before.Add(budget)))
-		require.False(t, deadline.After(after.Add(budget)))
+		require.False(t, deadline.After(after.Add(budget+budget/20)))
 	}
 }
 
@@ -130,7 +132,7 @@ func TestDynamicDeadlineCancelsRunningTask(t *testing.T) {
 		require.ErrorIs(t, task.Wait(), context.DeadlineExceeded)
 		require.NoError(t, parent.Err(), "cancellation must remain local to execution")
 		require.Same(t, parent, task.Context())
-		require.Len(t, latencies.samples, 1)
+		require.Equal(t, uint64(1), latencies.count)
 	}
 }
 
@@ -150,7 +152,7 @@ func TestDynamicDeadlinePreservesEarlierParentDeadline(t *testing.T) {
 	})
 	_, err := s.executeTask(task)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Len(t, s.searchLatencies.samples, 1)
+	require.Equal(t, uint64(1), s.searchLatencies.count)
 }
 
 func TestDynamicDeadlineDisabledAndExpiredWindow(t *testing.T) {
@@ -168,13 +170,13 @@ func TestDynamicDeadlineDisabledAndExpiredWindow(t *testing.T) {
 		require.NoError(t, params.Save(item.Key, "0"))
 		_, err := s.executeTask(task)
 		require.NoError(t, err)
-		require.Empty(t, s.searchLatencies.samples)
+		require.Zero(t, s.searchLatencies.count)
 		require.NoError(t, params.Save(item.Key, old))
 	}
 	s.searchLatencies.observeAt(time.Now().Add(-16*time.Second), time.Second, 15*time.Second, 0.9)
 	_, err := s.executeTask(task)
 	require.NoError(t, err)
-	require.Len(t, s.searchLatencies.samples, 1, "only the new successful execution remains")
+	require.Equal(t, uint64(1), s.searchLatencies.count, "only the new successful execution remains")
 }
 
 func TestDynamicDeadlineStartsAfterWaitingForWorker(t *testing.T) {
@@ -235,14 +237,14 @@ func TestDynamicDeadlineHotSwitch(t *testing.T) {
 	// A valid P90 and window must not collect samples while the switch is off.
 	runWithoutDeadline(true)
 	runWithoutDeadline(false)
-	require.Empty(t, s.searchLatencies.samples)
-	require.Empty(t, s.queryLatencies.samples)
+	require.Zero(t, s.searchLatencies.count)
+	require.Zero(t, s.queryLatencies.count)
 
 	require.NoError(t, params.Save(key, "true"))
 	runWithoutDeadline(true)
 	runWithoutDeadline(false)
-	require.Len(t, s.searchLatencies.samples, 1)
-	require.Len(t, s.queryLatencies.samples, 1)
+	require.Equal(t, uint64(1), s.searchLatencies.count)
+	require.Equal(t, uint64(1), s.queryLatencies.count)
 	for _, isSearch := range []bool{true, false} {
 		failure := errors.New("do not add another sample")
 		task := newDeadlineTestTask(parent, isSearch, func(ctx context.Context) error {
@@ -256,14 +258,14 @@ func TestDynamicDeadlineHotSwitch(t *testing.T) {
 
 	// Clear immediately, including a task kind that receives no further work.
 	require.NoError(t, params.Save(key, "false"))
-	require.Empty(t, s.searchLatencies.samples)
-	require.Empty(t, s.queryLatencies.samples)
+	require.Zero(t, s.searchLatencies.count)
+	require.Zero(t, s.queryLatencies.count)
 	// Even a quick off/on transition without intervening requests starts fresh.
 	require.NoError(t, params.Save(key, "true"))
 	runWithoutDeadline(true)
 	runWithoutDeadline(false)
-	require.Len(t, s.searchLatencies.samples, 1)
-	require.Len(t, s.queryLatencies.samples, 1)
+	require.Equal(t, uint64(1), s.searchLatencies.count)
+	require.Equal(t, uint64(1), s.queryLatencies.count)
 }
 
 func TestDynamicDeadlineSwitchExcludesInFlightSamples(t *testing.T) {
@@ -301,8 +303,8 @@ func TestDynamicDeadlineSwitchExcludesInFlightSamples(t *testing.T) {
 				}
 				close(release)
 				require.NoError(t, <-done)
-				require.Empty(t, s.searchLatencies.samples)
-				require.Empty(t, s.queryLatencies.samples)
+				require.Zero(t, s.searchLatencies.count)
+				require.Zero(t, s.queryLatencies.count)
 			}
 		})
 	}
@@ -320,4 +322,87 @@ func TestDynamicDeadlineWatcherCleanup(t *testing.T) {
 	require.NoError(t, params.Save(key, "true"))
 	require.False(t, s.deadlineEnabled, "a stopped scheduler must unregister its watcher")
 	require.True(t, other.deadlineEnabled, "stopping one scheduler must preserve other watchers")
+}
+
+func TestDynamicDeadlineCompletionUsesCurrentSettings(t *testing.T) {
+	for _, setting := range []string{"window grows", "window disabled", "ratio disabled"} {
+		t.Run(setting, func(t *testing.T) {
+			configureDynamicDeadline(t)
+			params := paramtable.Get()
+			require.NoError(t, params.Save(params.QueryNodeCfg.SchedulerTimeWindow.Key, "1s"))
+			s := newDynamicDeadlineTestScheduler(t)
+			started := make(chan struct{})
+			release := make(chan struct{})
+			done := make(chan error, 1)
+			task := newDeadlineTestTask(context.Background(), true, func(context.Context) error {
+				close(started)
+				<-release
+				return nil
+			})
+			go func() {
+				_, err := s.executeTask(task)
+				done <- err
+			}()
+			<-started
+			switch setting {
+			case "window grows":
+				require.NoError(t, params.Save(params.QueryNodeCfg.SchedulerTimeWindow.Key, "5s"))
+				// Simulate history retained under the new window while the old
+				// execution is still running. Its completion must not prune at 1s.
+				s.searchLatencies.mu.Lock()
+				s.searchLatencies.observeAt(time.Now().Add(-2*time.Second), time.Second, 5*time.Second, 0.9)
+				s.searchLatencies.mu.Unlock()
+			case "window disabled":
+				require.NoError(t, params.Save(params.QueryNodeCfg.SchedulerTimeWindow.Key, "0"))
+			case "ratio disabled":
+				require.NoError(t, params.Save(params.QueryNodeCfg.SuccessLatencyRatio.Key, "0"))
+			}
+			close(release)
+			require.NoError(t, <-done)
+			if setting == "window grows" {
+				require.Equal(t, uint64(2), s.searchLatencies.count)
+			} else {
+				require.Zero(t, s.searchLatencies.count, "old executions must not refill disabled sampling")
+			}
+		})
+	}
+}
+
+func TestDynamicDeadlineRatioUpdateWithInFlightTask(t *testing.T) {
+	configureDynamicDeadline(t)
+	params := paramtable.Get()
+	s := newDynamicDeadlineTestScheduler(t)
+	for i := 1; i <= 10; i++ {
+		s.searchLatencies.observe(time.Duration(i)*time.Second, 15*time.Second, 0.9)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	oldTask := newDeadlineTestTask(context.Background(), true, func(context.Context) error {
+		close(started)
+		<-release
+		return nil
+	})
+	go func() {
+		_, err := s.executeTask(oldTask)
+		done <- err
+	}()
+	<-started
+	require.NoError(t, params.Save(params.QueryNodeCfg.SuccessLatencyRatio.Key, "0.1"))
+	probeErr := errors.New("do not record the probe")
+	probe := newDeadlineTestTask(context.Background(), true, func(ctx context.Context) error {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		require.LessOrEqual(t, time.Until(deadline), 1050*time.Millisecond)
+		return probeErr
+	})
+	_, err := s.executeTask(probe)
+	require.ErrorIs(t, err, probeErr)
+	close(release)
+	require.NoError(t, <-done)
+	// The old execution adds a short sample; the second of 11 samples remains 1s.
+	got, ok := s.searchLatencies.timeout(15*time.Second, 0.1)
+	require.True(t, ok)
+	requireApproximateLatency(t, time.Second, got)
+	require.Equal(t, uint64(11), s.searchLatencies.count)
 }

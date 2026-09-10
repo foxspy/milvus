@@ -566,8 +566,8 @@ queryNode:
     unsolvedQueueSize: 1024
     enableTimestampOrdering: false # Hot-updatable switch for the fifo policy. Enabling reorders pending tasks by Proxy timestamp (ties keep local arrival order); disabling restores local arrival order. Already dispatched tasks are unaffected.
     enableDynamicDeadline: false # Hot-updatable switch. Enabling starts fresh success-latency sampling; disabling clears search/query samples. Already assigned execution deadlines remain in effect.
-    schedulerTimeWindow: 15s # Rolling window of successful Execute durations, separately for search and query. Non-positive disables dynamic deadlines; no samples means no decision.
-    successLatencyRatio: 0.9 # Execution timeout quantile when enableDynamicDeadline is true: 0.9 means P90. Measured from Execute start; an earlier client deadline takes precedence. Values outside (0, 1] disable it.
+    schedulerTimeWindow: 15s # Successful Execute durations, separately for search and query. Completion-time buckets are at most 1s; boundary samples may expire one bucket early. Non-positive disables dynamic deadlines; no samples means no decision. Growing the window cannot recover expired history.
+    successLatencyRatio: 0.9 # Hot-updatable execution timeout quantile: 0.9 means P90. Histogram upper bounds round retained-sample latency up by at most 5%; time-bucket expiration can further change the quantile. Measured from Execute start; an earlier client deadline takes precedence. Values outside (0, 1] disable it.
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.

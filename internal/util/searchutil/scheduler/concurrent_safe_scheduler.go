@@ -384,15 +384,14 @@ func (s *scheduler) executeTask(t Task) (time.Duration, error) {
 	if t.IsSearch() {
 		latencies = &s.searchLatencies
 	}
-	var window, timeout time.Duration
-	var ratio float64
+	var timeout time.Duration
 	var ok bool
 	s.deadlineMu.RLock()
 	enabled, generation := s.deadlineEnabled, s.deadlineGeneration
 	if enabled {
 		cfg := &paramtable.Get().QueryNodeCfg
-		window = cfg.SchedulerTimeWindow.GetAsDurationByParse()
-		ratio = cfg.SuccessLatencyRatio.GetAsFloat()
+		window := cfg.SchedulerTimeWindow.GetAsDurationByParse()
+		ratio := cfg.SuccessLatencyRatio.GetAsFloat()
 		timeout, ok = latencies.timeout(window, ratio)
 	}
 	ctx := t.Context()
@@ -409,7 +408,10 @@ func (s *scheduler) executeTask(t Task) (time.Duration, error) {
 		s.deadlineMu.RLock()
 		// A task from before a switch transition must not refill fresh windows.
 		if s.deadlineEnabled && s.deadlineGeneration == generation {
-			latencies.observe(executeDuration, window, ratio)
+			// Record against current settings, so a task that started before a
+			// hot update cannot prune with an old window or revive disabled sampling.
+			cfg := &paramtable.Get().QueryNodeCfg
+			latencies.observe(executeDuration, cfg.SchedulerTimeWindow.GetAsDurationByParse(), cfg.SuccessLatencyRatio.GetAsFloat())
 		}
 		s.deadlineMu.RUnlock()
 	}
