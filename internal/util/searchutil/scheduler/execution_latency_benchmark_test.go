@@ -28,7 +28,7 @@ func BenchmarkExecutionLatencyWindow(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					w.mu.Lock()
-					w.timeoutAt(now, window, 0.9)
+					w.quantileAt(now, window, 0.9)
 					w.mu.Unlock()
 					w.mu.Lock()
 					now = now.Add(step)

@@ -56,6 +56,9 @@ type CollectionWorkLoad struct {
 	Nq             int64
 	Exec           ExecuteFunc
 	PreferredNodes map[string]int64
+	// Keep sibling shards running for partial-result Search. Shard errors are
+	// still returned; partial-result evaluation remains in the delegator.
+	AllowPartialResult bool
 }
 
 type LBPolicy interface {
@@ -304,6 +307,13 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			if merr.GetErrorType(err) == merr.InputError {
 				return false, err
 			}
+			// An expired or rejected request must terminate instead of being
+			// dispatched to another replica. Check the wire code as well: a
+			// QN timeout returned in Status is no longer a context error.
+			switch merr.Code(err) {
+			case merr.TimeoutCode, merr.CanceledCode:
+				return false, err
+			}
 			excludeNodes.Insert(targetNode.NodeID)
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.NodeID, workload.Channel)
 			return true, lastErr
@@ -358,7 +368,12 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		})
 	}
 
-	wg, _ := errgroup.WithContext(ctx)
+	// Full-result requests fail fast; partial-result Search keeps sibling
+	// work alive even when one shard returns an admission timeout.
+	wg := new(errgroup.Group)
+	if !workload.AllowPartialResult {
+		wg, ctx = errgroup.WithContext(ctx)
+	}
 	// Launch a goroutine for each channel
 	for _, channel := range channelList {
 		wg.Go(func() error {

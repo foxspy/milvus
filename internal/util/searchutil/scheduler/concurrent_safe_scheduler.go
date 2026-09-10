@@ -68,7 +68,7 @@ type scheduler struct {
 
 	searchLatencies executionLatencyWindow
 	queryLatencies  executionLatencyWindow
-	// Serialize switch transitions with deadline decisions and sample recording.
+	// Serialize switch transitions with admission decisions and sample recording.
 	deadlineMu         sync.RWMutex
 	deadlineEnabled    bool
 	deadlineGeneration uint64
@@ -356,19 +356,7 @@ func (s *scheduler) exec() {
 				return nil, err
 			}
 
-			// Update concurrency metric and notify task done.
-			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Inc()
-			collector.Counter.Inc(metricsinfo.ExecuteQueueType)
-
-			executeDuration, err := s.executeTask(t)
-			metrics.QueryNodeReadTaskExecuteDuration.WithLabelValues(
-				paramtable.GetStringNodeID(),
-				readTaskExecuteOutcome(err),
-			).Observe(float64(executeDuration.Microseconds()) / 1000.0)
-
-			// Update all metric after task finished.
-			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Dec()
-			collector.Counter.Dec(metricsinfo.ExecuteQueueType)
+			_, err := s.executeTask(t)
 
 			// Notify task done.
 			t.Done(err)
@@ -377,14 +365,16 @@ func (s *scheduler) exec() {
 	}
 }
 
-// executeTask applies a deadline only after a pool worker is available. The
-// original task context remains unchanged for admission and queue ordering.
+// executeTask checks admission only after a pool worker is available, including
+// all queue and worker wait in the remaining request budget. The successful
+// execution quantile estimates the time needed; it never changes the deadline.
+// Rejected tasks do not enter Execute or contribute execution metrics/samples.
 func (s *scheduler) executeTask(t Task) (time.Duration, error) {
 	latencies := &s.queryLatencies
 	if t.IsSearch() {
 		latencies = &s.searchLatencies
 	}
-	var timeout time.Duration
+	var estimate time.Duration
 	var ok bool
 	s.deadlineMu.RLock()
 	enabled, generation := s.deadlineEnabled, s.deadlineGeneration
@@ -392,18 +382,32 @@ func (s *scheduler) executeTask(t Task) (time.Duration, error) {
 		cfg := &paramtable.Get().QueryNodeCfg
 		window := cfg.SchedulerTimeWindow.GetAsDurationByParse()
 		ratio := cfg.SuccessLatencyRatio.GetAsFloat()
-		timeout, ok = latencies.timeout(window, ratio)
+		estimate, ok = latencies.quantile(window, ratio)
 	}
 	ctx := t.Context()
-	executeStart := time.Now()
-	if ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, executeStart.Add(timeout))
-		defer cancel()
+	admissionErr := ctx.Err()
+	if deadline, hasDeadline := ctx.Deadline(); admissionErr == nil && ok && hasDeadline {
+		if remaining := time.Until(deadline); remaining < estimate {
+			admissionErr = fmt.Errorf("insufficient time before Execute (remaining %s, estimated execution %s): %w",
+				remaining, estimate, context.DeadlineExceeded)
+		}
 	}
 	s.deadlineMu.RUnlock()
+	if admissionErr != nil {
+		return 0, admissionErr
+	}
+
+	metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Inc()
+	collector.Counter.Inc(metricsinfo.ExecuteQueueType)
+	executeStart := time.Now()
 	err := t.Execute(ctx)
 	executeDuration := time.Since(executeStart)
+	metrics.QueryNodeReadTaskExecuteDuration.WithLabelValues(
+		paramtable.GetStringNodeID(),
+		readTaskExecuteOutcome(err),
+	).Observe(float64(executeDuration.Microseconds()) / 1000.0)
+	metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Dec()
+	collector.Counter.Dec(metricsinfo.ExecuteQueueType)
 	if enabled && err == nil && ctx.Err() == nil {
 		s.deadlineMu.RLock()
 		// A task from before a switch transition must not refill fresh windows.

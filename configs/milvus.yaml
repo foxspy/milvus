@@ -565,9 +565,9 @@ queryNode:
   scheduler:
     unsolvedQueueSize: 1024
     enableTimestampOrdering: false # Hot-updatable switch for the fifo policy. Enabling reorders pending tasks by Proxy timestamp (ties keep local arrival order); disabling restores local arrival order. Already dispatched tasks are unaffected.
-    enableDynamicDeadline: false # Hot-updatable switch. Enabling starts fresh success-latency sampling; disabling clears search/query samples. Already assigned execution deadlines remain in effect.
-    schedulerTimeWindow: 15s # Successful Execute durations, separately for search and query. Completion-time buckets are at most 1s; boundary samples may expire one bucket early. Non-positive disables dynamic deadlines; no samples means no decision. Growing the window cannot recover expired history.
-    successLatencyRatio: 0.9 # Hot-updatable execution timeout quantile: 0.9 means P90. Histogram upper bounds round retained-sample latency up by at most 5%; time-bucket expiration can further change the quantile. Measured from Execute start; an earlier client deadline takes precedence. Values outside (0, 1] disable it.
+    enableDynamicDeadline: false # Hot-updatable switch. Enabling starts fresh success-latency sampling; disabling clears search/query samples. Before Execute, reject tasks with remaining deadline shorter than the estimated execution time; admitted tasks keep their original context and deadline.
+    schedulerTimeWindow: 15s # Successful Execute durations, separately for search and query. Completion-time buckets are at most 1s; boundary samples may expire one bucket early. Non-positive disables dynamic admission; no samples means no decision. Growing the window cannot recover expired history.
+    successLatencyRatio: 0.9 # Hot-updatable execution time estimate quantile: 0.9 means P90. Histogram upper bounds round retained-sample latency up by at most 5%; time-bucket expiration can further change the quantile. Compared with the original deadline remaining when a worker becomes available; tasks without a deadline are admitted. Values outside (0, 1] disable it.
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.

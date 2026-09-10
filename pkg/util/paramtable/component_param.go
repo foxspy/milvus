@@ -4544,7 +4544,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.scheduler.enableDynamicDeadline",
 		Version:      "2.6.24",
 		DefaultValue: "false",
-		Doc:          "Enable successful execution latency sampling and dynamic deadlines for new read task executions. Supports hot updates. Disabling clears both search and query samples; re-enabling starts fresh. Deadlines already assigned to running tasks remain in effect.",
+		Doc:          "Enable successful execution latency sampling and admission checks before Execute. Reject tasks whose remaining request deadline is shorter than the estimated execution time; admitted tasks keep their original context and deadline. Supports hot updates. Disabling clears both search and query samples; re-enabling starts fresh.",
 		Export:       true,
 	}
 	p.EnableDynamicDeadline.Init(base.mgr)
@@ -4553,7 +4553,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.scheduler.schedulerTimeWindow",
 		Version:      "2.6.24",
 		DefaultValue: "15s",
-		Doc:          "Rolling time window of successful Execute durations, separately for search and query. Samples are grouped by completion time into buckets of at most 1s (shorter for subsecond windows); boundary samples may be discarded up to one bucket early. Hot updates use the new window; expired history is not recovered when growing it. Use a duration string such as 15s. A non-positive duration disables dynamic deadlines; an empty window makes no deadline decision.",
+		Doc:          "Rolling time window of successful Execute durations, separately for search and query. Samples are grouped by completion time into buckets of at most 1s (shorter for subsecond windows); boundary samples may be discarded up to one bucket early. Hot updates use the new window; expired history is not recovered when growing it. Use a duration string such as 15s. A non-positive duration disables dynamic admission; an empty window makes no admission decision.",
 		Export:       true,
 	}
 	p.SchedulerTimeWindow.Init(base.mgr)
@@ -4569,7 +4569,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 			}
 			return v
 		},
-		Doc:    "Successful execution latency quantile used as the timeout from Execute start: 0.9 selects P90. Uses histogram bucket upper bounds, rounding the selected retained-sample latency up by at most 5%; time-bucket expiration can further change the quantile. Supports hot updates without rebalancing samples. Values outside (0, 1] disable dynamic deadlines. An earlier client deadline always takes precedence.",
+		Doc:    "Successful execution latency quantile used to estimate execution time for admission: 0.9 selects P90. When a worker becomes available, reject a task if its original deadline has less time remaining than this estimate; otherwise Execute with the original context and deadline. Tasks without a deadline are admitted. Uses histogram bucket upper bounds, rounding the selected retained-sample latency up by at most 5%; time-bucket expiration can further change the quantile. Supports hot updates without rebalancing samples. Values outside (0, 1] disable dynamic admission.",
 		Export: true,
 	}
 	p.SuccessLatencyRatio.Init(base.mgr)

@@ -978,11 +978,12 @@ func (t *searchTask) Execute(ctx context.Context) error {
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
 	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.request.GetDbName(),
-		CollectionID:   t.CollectionID,
-		CollectionName: t.collectionName,
-		Nq:             t.Nq,
-		Exec:           t.searchShard,
+		Db:                 t.request.GetDbName(),
+		CollectionID:       t.CollectionID,
+		CollectionName:     t.collectionName,
+		Nq:                 t.Nq,
+		Exec:               t.searchShard,
+		AllowPartialResult: paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat() < 1,
 	})
 	if err != nil {
 		log.Warn("search execute failed", zap.Error(err))

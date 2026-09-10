@@ -6250,3 +6250,26 @@ func TestSearchTask_SearchRequeryPolicy(t *testing.T) {
 		assert.False(t, task.needRequery, "only pk output should not trigger requery under outputvector policy")
 	})
 }
+
+func TestSearchTaskExecutePartialResultSetting(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	item := &params.QueryNodeCfg.PartialResultRequiredDataRatio
+	old := item.GetValue()
+	defer func() { assert.NoError(t, params.Save(item.Key, old)) }()
+	ctx := context.Background()
+	for _, ratio := range []string{"1", "0.5", "1"} {
+		assert.NoError(t, params.Save(item.Key, ratio))
+		lb := shardclient.NewMockLBPolicy(t)
+		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(_ context.Context, workload shardclient.CollectionWorkLoad) {
+			assert.Equal(t, ratio != "1", workload.AllowPartialResult)
+		}).Return(nil).Once()
+		task := &searchTask{
+			ctx:           ctx,
+			SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{}},
+			request:       &milvuspb.SearchRequest{},
+			lb:            lb,
+		}
+		assert.NoError(t, task.Execute(ctx))
+	}
+}

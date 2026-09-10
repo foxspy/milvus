@@ -20,6 +20,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -478,7 +479,6 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.Canceled).Once()
-	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.DeadlineExceeded)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
@@ -490,7 +490,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 			return err
 		},
 	})
-	s.True(merr.IsCanceledOrTimeout(err))
+	s.ErrorIs(err, context.Canceled)
 }
 
 func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorUsesRequestLevelRetry() {
@@ -694,6 +694,94 @@ func (s *LBPolicySuite) TestExecuteWithRetryInputErrorNotRetried() {
 	s.ErrorIs(err, merr.ErrParameterInvalid)
 	// not retried across replicas despite retryOnReplica=3
 	s.Equal(1, execCount)
+}
+
+func (s *LBPolicySuite) TestExecuteWithRetryTimeoutAndCancellationNotRetried() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	s.lbPolicy.retryOnReplica = 3
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(s.nodes, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(s.nodes[0].NodeID, nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	for _, cause := range []error{context.DeadlineExceeded, context.Canceled} {
+		for _, wireRoundTrip := range []bool{false, true} {
+			err := errors.Wrap(cause, "request rejected before Execute")
+			if wireRoundTrip {
+				err = merr.Error(merr.Status(err))
+			}
+			expected := errors.Wrap(err, "fail to search on QueryNode")
+			executed := 0
+			err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+				Db:             s.dbName,
+				CollectionName: s.collectionName,
+				CollectionID:   s.collectionID,
+				Channel:        channel,
+				Nq:             1,
+				Exec: func(context.Context, UniqueID, types.QueryNodeClient, string) error {
+					executed++
+					return expected
+				},
+			})
+			s.ErrorIs(err, expected)
+			s.Equal(merr.Code(cause), merr.Code(err))
+			s.Equal(1, executed, "must not retry terminal errors, including after Status serialization")
+			s.False(merr.Status(err).GetRetriable())
+		}
+	}
+}
+
+func (s *LBPolicySuite) TestExecuteTimeoutRespectsPartialResults() {
+	for _, allowPartialResult := range []bool{false, true} {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		s.lbPolicy.retryOnReplica = 3
+		s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(s.channels, nil)
+		s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, mock.Anything).Return(s.nodes, nil)
+		s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+		s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+		s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(s.nodes[0].NodeID, nil)
+		s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+		siblingStarted := make(chan struct{})
+		siblingCanceled := atomic.NewBool(false)
+		siblingSucceeded := atomic.NewBool(false)
+		executed := atomic.NewInt64(0)
+		// Model the QN's application-level timeout response while the client's
+		// original deadline still has ample budget.
+		timeoutErr := merr.Error(merr.Status(errors.Wrap(context.DeadlineExceeded, "insufficient time before Execute")))
+		err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
+			Db:                 s.dbName,
+			CollectionName:     s.collectionName,
+			CollectionID:       s.collectionID,
+			Nq:                 1,
+			AllowPartialResult: allowPartialResult,
+			Exec: func(taskCtx context.Context, _ UniqueID, _ types.QueryNodeClient, channel string) error {
+				executed.Inc()
+				if channel == s.channels[0] {
+					<-siblingStarted
+					return timeoutErr
+				}
+				close(siblingStarted)
+				select {
+				case <-taskCtx.Done():
+					siblingCanceled.Store(true)
+					return taskCtx.Err()
+				case <-time.After(100 * time.Millisecond):
+					siblingSucceeded.Store(true)
+					return nil
+				}
+			},
+		})
+		s.Equal(merr.TimeoutCode, merr.Code(err), "preserve the first timeout instead of the sibling's cancellation")
+		s.False(merr.Status(err).GetRetriable())
+		s.Equal(!allowPartialResult, siblingCanceled.Load(), "only full-result requests cancel sibling work")
+		s.Equal(allowPartialResult, siblingSucceeded.Load(), "partial-result Search lets sibling work complete")
+		s.Equal(int64(2), executed.Load(), "one call per channel, no replica retry")
+		s.NoError(ctx.Err(), "cancel derived shard work without changing the caller's deadline")
+	}
 }
 
 func (s *LBPolicySuite) TestExecuteOneChannel() {

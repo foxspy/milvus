@@ -2,13 +2,16 @@ package scheduler
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -55,7 +58,8 @@ func newDynamicDeadlineTestScheduler(t *testing.T) *scheduler {
 func TestDynamicDeadlineNoSamplesAndSuccessfulSamples(t *testing.T) {
 	configureDynamicDeadline(t)
 	s := newDynamicDeadlineTestScheduler(t)
-	parent := context.WithValue(context.Background(), struct{}{}, "request value")
+	parent, cancel := context.WithTimeout(context.WithValue(context.Background(), struct{}{}, "request value"), time.Minute)
+	defer cancel()
 	task := newDeadlineTestTask(parent, true, func(ctx context.Context) error {
 		require.Same(t, parent, ctx, "without samples the context must be passed through")
 		time.Sleep(time.Millisecond)
@@ -64,7 +68,7 @@ func TestDynamicDeadlineNoSamplesAndSuccessfulSamples(t *testing.T) {
 	duration, err := s.executeTask(task)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), s.searchLatencies.count)
-	estimate, ok := s.searchLatencies.timeout(15*time.Second, 0.9)
+	estimate, ok := s.searchLatencies.quantile(15*time.Second, 0.9)
 	require.True(t, ok)
 	requireApproximateLatency(t, duration, estimate)
 	require.Zero(t, s.queryLatencies.count)
@@ -80,32 +84,31 @@ func TestDynamicDeadlineNoSamplesAndSuccessfulSamples(t *testing.T) {
 func TestDynamicDeadlineSeparatesSearchAndQuery(t *testing.T) {
 	configureDynamicDeadline(t)
 	s := newDynamicDeadlineTestScheduler(t)
-	// Different kinds use different budgets, without splitting by other factors.
 	s.searchLatencies.observe(time.Second, 15*time.Second, 0.9)
 	s.queryLatencies.observe(10*time.Second, 15*time.Second, 0.9)
+	parent, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	for _, isSearch := range []bool{true, false} {
-		budget := 10 * time.Second
-		if isSearch {
-			budget = time.Second
-		}
-		var deadline time.Time
+		called := false
 		failure := errors.New("do not change the samples")
-		task := newDeadlineTestTask(context.Background(), isSearch, func(ctx context.Context) error {
-			var ok bool
-			deadline, ok = ctx.Deadline()
-			require.True(t, ok)
+		task := newDeadlineTestTask(parent, isSearch, func(ctx context.Context) error {
+			called = true
+			require.Same(t, parent, ctx)
 			return failure
 		})
-		before := time.Now()
 		_, err := s.executeTask(task)
-		after := time.Now()
-		require.ErrorIs(t, err, failure)
-		require.False(t, deadline.Before(before.Add(budget)))
-		require.False(t, deadline.After(after.Add(budget+budget/20)))
+		if isSearch {
+			require.ErrorIs(t, err, failure)
+		} else {
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+		}
+		require.Equal(t, isSearch, called, "the same budget admits search but rejects query")
 	}
+	require.Equal(t, uint64(1), s.searchLatencies.count)
+	require.Equal(t, uint64(1), s.queryLatencies.count)
 }
 
-func TestDynamicDeadlineCancelsRunningTask(t *testing.T) {
+func TestDynamicDeadlineRejectsBeforeExecute(t *testing.T) {
 	configureDynamicDeadline(t)
 	for _, isSearch := range []bool{true, false} {
 		s := newScheduler(newFIFOPolicy()).(*scheduler)
@@ -113,59 +116,111 @@ func TestDynamicDeadlineCancelsRunningTask(t *testing.T) {
 		if isSearch {
 			latencies = &s.searchLatencies
 		}
-		latencies.observe(20*time.Millisecond, 15*time.Second, 0.9)
+		latencies.observe(2*time.Minute, 15*time.Second, 0.9)
 		s.Start()
 		t.Cleanup(s.Stop)
-		parent := context.WithValue(context.Background(), struct{}{}, "request value")
-		task := newDeadlineTestTask(parent, isSearch, func(ctx context.Context) error {
-			if ctx.Value(struct{}{}) != "request value" {
-				return errors.New("execution context lost request values")
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(2 * time.Second):
-				return errors.New("dynamic deadline did not cancel execution")
-			}
+		parent, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		called := false
+		task := newDeadlineTestTask(parent, isSearch, func(context.Context) error {
+			called = true
+			return errors.New("rejected task entered Execute")
 		})
+		before := readTaskExecuteDurationCount(metrics.CancelLabel)
 		require.NoError(t, s.Add(task))
-		require.ErrorIs(t, task.Wait(), context.DeadlineExceeded)
-		require.NoError(t, parent.Err(), "cancellation must remain local to execution")
-		require.Same(t, parent, task.Context())
+		err := task.Wait()
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		status := merr.Status(err)
+		require.Equal(t, merr.TimeoutCode, status.GetCode())
+		require.False(t, status.GetRetriable(), "report an application timeout without inviting RPC retries")
+		require.False(t, called)
+		require.NoError(t, parent.Err(), "reject before the original deadline expires")
+		require.Equal(t, before, readTaskExecuteDurationCount(metrics.CancelLabel), "admission rejection is not execution cancellation")
 		require.Equal(t, uint64(1), latencies.count)
 	}
 }
 
-func TestDynamicDeadlinePreservesEarlierParentDeadline(t *testing.T) {
+func TestDynamicDeadlineAdmittedTaskCanExceedEstimate(t *testing.T) {
+	configureDynamicDeadline(t)
+	for _, isSearch := range []bool{true, false} {
+		s := newScheduler(newFIFOPolicy()).(*scheduler)
+		latencies := &s.queryLatencies
+		if isSearch {
+			latencies = &s.searchLatencies
+		}
+		latencies.observe(time.Millisecond, 15*time.Second, 0.9)
+		s.Start()
+		t.Cleanup(s.Stop)
+		parent, cancel := context.WithTimeout(context.WithValue(context.Background(), struct{}{}, "request value"), time.Minute)
+		defer cancel()
+		task := newDeadlineTestTask(parent, isSearch, func(ctx context.Context) error {
+			if ctx != parent {
+				return errors.New("admitted task must keep its original context and deadline")
+			}
+			time.Sleep(20 * time.Millisecond)
+			return ctx.Err()
+		})
+		require.NoError(t, s.Add(task))
+		require.NoError(t, task.Wait(), "the estimate must not cap execution time")
+		require.Equal(t, uint64(2), latencies.count, "successful executions beyond the estimate must enter the window")
+	}
+}
+
+func TestDynamicDeadlinePreservesOriginalCancellation(t *testing.T) {
+	configureDynamicDeadline(t)
+	for _, cancellation := range []string{"deadline", "cancel"} {
+		t.Run(cancellation, func(t *testing.T) {
+			s := newDynamicDeadlineTestScheduler(t)
+			s.searchLatencies.observe(time.Millisecond, 15*time.Second, 0.9)
+			parent, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			task := newDeadlineTestTask(parent, true, func(ctx context.Context) error {
+				require.Same(t, parent, ctx)
+				if cancellation == "cancel" {
+					cancel()
+				}
+				<-ctx.Done()
+				return ctx.Err()
+			})
+			_, err := s.executeTask(task)
+			if cancellation == "deadline" {
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+			} else {
+				require.ErrorIs(t, err, context.Canceled)
+			}
+			require.Equal(t, uint64(1), s.searchLatencies.count)
+		})
+	}
+}
+
+func TestDynamicDeadlineNoRequestDeadline(t *testing.T) {
 	configureDynamicDeadline(t)
 	s := newDynamicDeadlineTestScheduler(t)
 	s.searchLatencies.observe(time.Second, 15*time.Second, 0.9)
-	parent, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	want, _ := parent.Deadline()
+	parent := context.WithValue(context.Background(), struct{}{}, "request value")
 	task := newDeadlineTestTask(parent, true, func(ctx context.Context) error {
-		got, ok := ctx.Deadline()
-		require.True(t, ok)
-		require.Equal(t, want, got)
-		<-ctx.Done()
-		return ctx.Err()
+		require.Same(t, parent, ctx)
+		_, hasDeadline := ctx.Deadline()
+		require.False(t, hasDeadline, "sampling must never introduce a deadline")
+		return nil
 	})
 	_, err := s.executeTask(task)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Equal(t, uint64(1), s.searchLatencies.count)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), s.searchLatencies.count)
 }
 
 func TestDynamicDeadlineDisabledAndExpiredWindow(t *testing.T) {
 	configureDynamicDeadline(t)
 	s := newDynamicDeadlineTestScheduler(t)
-	parent := context.Background()
+	parent, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
 	task := newDeadlineTestTask(parent, true, func(ctx context.Context) error {
 		require.True(t, parent == ctx)
 		return nil
 	})
 	params := paramtable.Get()
 	for _, item := range []*paramtable.ParamItem{&params.QueryNodeCfg.SuccessLatencyRatio, &params.QueryNodeCfg.SchedulerTimeWindow} {
-		s.searchLatencies.observe(time.Second, 15*time.Second, 0.9)
+		s.searchLatencies.observe(2*time.Minute, 15*time.Second, 0.9)
 		old := item.GetValue()
 		require.NoError(t, params.Save(item.Key, "0"))
 		_, err := s.executeTask(task)
@@ -173,18 +228,18 @@ func TestDynamicDeadlineDisabledAndExpiredWindow(t *testing.T) {
 		require.Zero(t, s.searchLatencies.count)
 		require.NoError(t, params.Save(item.Key, old))
 	}
-	s.searchLatencies.observeAt(time.Now().Add(-16*time.Second), time.Second, 15*time.Second, 0.9)
+	s.searchLatencies.observeAt(time.Now().Add(-16*time.Second), 2*time.Minute, 15*time.Second, 0.9)
 	_, err := s.executeTask(task)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), s.searchLatencies.count, "only the new successful execution remains")
 }
 
-func TestDynamicDeadlineStartsAfterWaitingForWorker(t *testing.T) {
+func TestDynamicDeadlineAdmissionAfterWaitingForWorker(t *testing.T) {
 	configureDynamicDeadline(t)
 	s := &scheduler{execChan: make(chan Task), pool: conc.NewPool[any](1, conc.WithPreAlloc(true))}
 	s.watchDynamicDeadline()
 	t.Cleanup(s.unwatchDynamicDeadline)
-	s.searchLatencies.observe(20*time.Millisecond, 15*time.Second, 0.9)
+	s.searchLatencies.observe(800*time.Millisecond, 15*time.Second, 0.9)
 	s.wg.Add(1)
 	go s.exec()
 	defer func() {
@@ -193,30 +248,32 @@ func TestDynamicDeadlineStartsAfterWaitingForWorker(t *testing.T) {
 		s.pool.Release()
 	}()
 	started := make(chan struct{})
-	// A query without samples occupies the worker beyond the search's budget.
+	// Waiting for this query consumes enough of the search's original budget
+	// to make it inadmissible, while leaving its context unexpired.
 	first := newDeadlineTestTask(context.Background(), false, func(context.Context) error {
 		close(started)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(400 * time.Millisecond)
 		return nil
 	})
 	s.execChan <- first
 	<-started
-	var workerStarted, deadline time.Time
-	second := newDeadlineTestTask(context.Background(), true, func(ctx context.Context) error {
-		workerStarted = time.Now()
-		var ok bool
-		deadline, ok = ctx.Deadline()
-		if !ok {
-			return errors.New("missing execution deadline")
-		}
-		return ctx.Err()
+	parent, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	called := false
+	second := newDeadlineTestTask(parent, true, func(context.Context) error {
+		called = true
+		return nil
 	})
-	submitted := time.Now()
+	estimate, ok := s.searchLatencies.quantile(15*time.Second, 0.9)
+	require.True(t, ok)
+	deadline, _ := parent.Deadline()
+	require.Greater(t, time.Until(deadline), estimate, "sufficient budget before waiting")
 	s.execChan <- second
 	require.NoError(t, first.Wait())
-	require.NoError(t, second.Wait())
-	require.Greater(t, workerStarted.Sub(submitted), 20*time.Millisecond)
-	require.True(t, deadline.After(workerStarted))
+	require.ErrorIs(t, second.Wait(), context.DeadlineExceeded)
+	require.False(t, called)
+	require.NoError(t, parent.Err())
+	require.Equal(t, uint64(1), s.searchLatencies.count)
 }
 
 func TestDynamicDeadlineHotSwitch(t *testing.T) {
@@ -225,8 +282,9 @@ func TestDynamicDeadlineHotSwitch(t *testing.T) {
 	key := params.QueryNodeCfg.EnableDynamicDeadline.Key
 	require.NoError(t, params.Save(key, "false"))
 	s := newDynamicDeadlineTestScheduler(t)
-	parent := context.Background()
-	runWithoutDeadline := func(isSearch bool) {
+	parent, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	runAdmitted := func(isSearch bool) {
 		task := newDeadlineTestTask(parent, isSearch, func(ctx context.Context) error {
 			require.True(t, parent == ctx)
 			return nil
@@ -235,35 +293,42 @@ func TestDynamicDeadlineHotSwitch(t *testing.T) {
 		require.NoError(t, err)
 	}
 	// A valid P90 and window must not collect samples while the switch is off.
-	runWithoutDeadline(true)
-	runWithoutDeadline(false)
+	runAdmitted(true)
+	runAdmitted(false)
 	require.Zero(t, s.searchLatencies.count)
 	require.Zero(t, s.queryLatencies.count)
 
 	require.NoError(t, params.Save(key, "true"))
-	runWithoutDeadline(true)
-	runWithoutDeadline(false)
+	runAdmitted(true)
+	runAdmitted(false)
 	require.Equal(t, uint64(1), s.searchLatencies.count)
 	require.Equal(t, uint64(1), s.queryLatencies.count)
 	for _, isSearch := range []bool{true, false} {
-		failure := errors.New("do not add another sample")
-		task := newDeadlineTestTask(parent, isSearch, func(ctx context.Context) error {
-			_, ok := ctx.Deadline()
-			require.True(t, ok, "an enabled scheduler with samples assigns a deadline")
-			return failure
+		latencies := &s.queryLatencies
+		if isSearch {
+			latencies = &s.searchLatencies
+		}
+		latencies.reset()
+		latencies.observe(2*time.Minute, 15*time.Second, 0.9)
+		task := newDeadlineTestTask(parent, isSearch, func(context.Context) error {
+			return errors.New("enabled admission should reject insufficient budget")
 		})
 		_, err := s.executeTask(task)
-		require.ErrorIs(t, err, failure)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
 	}
 
 	// Clear immediately, including a task kind that receives no further work.
 	require.NoError(t, params.Save(key, "false"))
 	require.Zero(t, s.searchLatencies.count)
 	require.Zero(t, s.queryLatencies.count)
+	runAdmitted(true)
+	runAdmitted(false)
+	require.Zero(t, s.searchLatencies.count)
+	require.Zero(t, s.queryLatencies.count)
 	// Even a quick off/on transition without intervening requests starts fresh.
 	require.NoError(t, params.Save(key, "true"))
-	runWithoutDeadline(true)
-	runWithoutDeadline(false)
+	runAdmitted(true)
+	runAdmitted(false)
 	require.Equal(t, uint64(1), s.searchLatencies.count)
 	require.Equal(t, uint64(1), s.queryLatencies.count)
 }
@@ -377,10 +442,17 @@ func TestDynamicDeadlineRatioUpdateWithInFlightTask(t *testing.T) {
 	}
 	started := make(chan struct{})
 	release := make(chan struct{})
+	releaseTask := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseTask)
 	done := make(chan error, 1)
-	oldTask := newDeadlineTestTask(context.Background(), true, func(context.Context) error {
+	parent, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	oldTask := newDeadlineTestTask(parent, true, func(ctx context.Context) error {
 		close(started)
 		<-release
+		if ctx != parent {
+			return errors.New("admission changed the original context")
+		}
 		return nil
 	})
 	go func() {
@@ -388,20 +460,25 @@ func TestDynamicDeadlineRatioUpdateWithInFlightTask(t *testing.T) {
 		done <- err
 	}()
 	<-started
-	require.NoError(t, params.Save(params.QueryNodeCfg.SuccessLatencyRatio.Key, "0.1"))
 	probeErr := errors.New("do not record the probe")
-	probe := newDeadlineTestTask(context.Background(), true, func(ctx context.Context) error {
-		deadline, ok := ctx.Deadline()
-		require.True(t, ok)
-		require.LessOrEqual(t, time.Until(deadline), 1050*time.Millisecond)
+	probeContext, cancelProbe := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelProbe()
+	probe := newDeadlineTestTask(probeContext, true, func(ctx context.Context) error {
+		require.Same(t, probeContext, ctx)
 		return probeErr
 	})
 	_, err := s.executeTask(probe)
-	require.ErrorIs(t, err, probeErr)
-	close(release)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "P90 exceeds the remaining budget")
+	require.NoError(t, params.Save(params.QueryNodeCfg.SuccessLatencyRatio.Key, "0.1"))
+	_, err = s.executeTask(probe)
+	require.ErrorIs(t, err, probeErr, "P10 now fits the same budget")
+	require.NoError(t, params.Save(params.QueryNodeCfg.SuccessLatencyRatio.Key, "0.99"))
+	_, err = s.executeTask(probe)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "P99 rejects again using retained samples")
+	releaseTask()
 	require.NoError(t, <-done)
 	// The old execution adds a short sample; the second of 11 samples remains 1s.
-	got, ok := s.searchLatencies.timeout(15*time.Second, 0.1)
+	got, ok := s.searchLatencies.quantile(15*time.Second, 0.1)
 	require.True(t, ok)
 	requireApproximateLatency(t, time.Second, got)
 	require.Equal(t, uint64(11), s.searchLatencies.count)

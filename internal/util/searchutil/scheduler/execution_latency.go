@@ -62,15 +62,15 @@ func (w *executionLatencyWindow) resetLocked() {
 	w.count = 0
 }
 
-func (w *executionLatencyWindow) timeout(window time.Duration, ratio float64) (time.Duration, bool) {
+func (w *executionLatencyWindow) quantile(window time.Duration, ratio float64) (time.Duration, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.timeoutAt(time.Now(), window, ratio)
+	return w.quantileAt(time.Now(), window, ratio)
 }
 
-// timeoutAt and observeAt require exclusive access. Clock reads stay inside
+// quantileAt and observeAt require exclusive access. Clock reads stay inside
 // the lock so completion-time buckets remain ordered under concurrency.
-func (w *executionLatencyWindow) timeoutAt(now time.Time, window time.Duration, ratio float64) (time.Duration, bool) {
+func (w *executionLatencyWindow) quantileAt(now time.Time, window time.Duration, ratio float64) (time.Duration, bool) {
 	if !dynamicDeadlineEnabled(window, ratio) {
 		w.resetLocked()
 		return 0, false
