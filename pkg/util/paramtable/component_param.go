@@ -3534,6 +3534,7 @@ type queryNodeConfig struct {
 	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
 	MaxReadConcurrency           ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
+	EnableTimestampOrdering      ParamItem `refreshable:"true"`
 	EnableDynamicDeadline        ParamItem `refreshable:"true"`
 	SchedulerTimeWindow          ParamItem `refreshable:"true"`
 	SuccessLatencyRatio          ParamItem `refreshable:"true"`
@@ -4530,6 +4531,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
 
+	p.EnableTimestampOrdering = ParamItem{
+		Key:          "queryNode.scheduler.enableTimestampOrdering",
+		Version:      "2.6.24",
+		DefaultValue: "false",
+		Doc:          "Hot-updatable switch for Proxy timestamp ordering under the fifo policy. Enabling reorders pending tasks by timestamp, preserving local arrival order for ties. Disabling restores local arrival order. Already dispatched tasks are unaffected.",
+		Export:       true,
+	}
+	p.EnableTimestampOrdering.Init(base.mgr)
+
 	p.EnableDynamicDeadline = ParamItem{
 		Key:          "queryNode.scheduler.enableDynamicDeadline",
 		Version:      "2.6.24",
@@ -4829,7 +4839,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.scheduler.scheduleReadPolicy.name",
 		Version:      "2.3.0",
 		DefaultValue: "fifo",
-		Doc: `fifo: Read tasks are ordered by the Proxy-assigned timestamp so fan-out sub-tasks are consumed in timestamp order across QueryNodes. Tasks with identical timestamps retain their local arrival order.
+		Doc: `fifo: Read tasks retain their local arrival order by default. When enableTimestampOrdering is enabled, tasks are ordered by the Proxy-assigned timestamp; tasks with identical timestamps retain their local arrival order.
 user-task-polling:
 	The user's tasks will be polled one by one and scheduled.
 	Scheduling is fair on task granularity.

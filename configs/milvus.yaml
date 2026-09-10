@@ -564,6 +564,7 @@ queryNode:
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
     unsolvedQueueSize: 1024
+    enableTimestampOrdering: false # Hot-updatable switch for the fifo policy. Enabling reorders pending tasks by Proxy timestamp (ties keep local arrival order); disabling restores local arrival order. Already dispatched tasks are unaffected.
     enableDynamicDeadline: false # Hot-updatable switch. Enabling starts fresh success-latency sampling; disabling clears search/query samples. Already assigned execution deadlines remain in effect.
     schedulerTimeWindow: 15s # Rolling window of successful Execute durations, separately for search and query. Non-positive disables dynamic deadlines; no samples means no decision.
     successLatencyRatio: 0.9 # Execution timeout quantile when enableDynamicDeadline is true: 0.9 means P90. Measured from Execute start; an earlier client deadline takes precedence. Values outside (0, 1] disable it.
@@ -576,7 +577,7 @@ queryNode:
     cpuRatio: 10 # ratio used to estimate read task cpu usage.
     maxTimestampLag: 86400
     scheduleReadPolicy:
-      # fifo: Order queued read tasks by the Proxy-assigned timestamp; ties retain local arrival order.
+      # fifo: Use local arrival order by default; enableTimestampOrdering switches to Proxy-assigned timestamp order, with ties retaining local arrival order.
       # user-task-polling:
       # 	The user's tasks will be polled one by one and scheduled.
       # 	Scheduling is fair on task granularity.

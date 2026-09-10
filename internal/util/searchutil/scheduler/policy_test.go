@@ -22,8 +22,28 @@ func TestFIFOPolicy(t *testing.T) {
 	testCommonPolicyOperation(t, newFIFOPolicy())
 }
 
+func TestFIFOPolicyUsesLocalArrivalOrderByDefault(t *testing.T) {
+	paramtable.Init()
+	assert.False(t, paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.GetAsBool())
+	policy := newFIFOPolicy()
+	tasks := []Task{
+		newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 30}}),
+		newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 10}}),
+		newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 20}}),
+	}
+	for _, task := range tasks {
+		_, err := policy.Push(newQueuedTask(task, time.Now()))
+		assert.NoError(t, err)
+	}
+	for _, task := range tasks {
+		assert.Same(t, task, policy.Pop(time.Now()).Task)
+	}
+}
+
 func TestFIFOPolicyOrdersByProxyTimestamp(t *testing.T) {
 	paramtable.Init()
+	oldOrdering := paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue("true")
+	defer paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue(oldOrdering)
 	orders := []TaskOrder{
 		{Timestamp: 30},
 		{Timestamp: 10},
@@ -50,6 +70,8 @@ func TestFIFOPolicyOrdersByProxyTimestamp(t *testing.T) {
 
 func TestFIFOPolicyKeepsLocalArrivalOrderForEqualTimestamps(t *testing.T) {
 	paramtable.Init()
+	oldOrdering := paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue("true")
+	defer paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue(oldOrdering)
 	policy := newFIFOPolicy()
 	tasks := []Task{
 		newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 10}}),
@@ -68,6 +90,8 @@ func TestFIFOPolicyKeepsLocalArrivalOrderForEqualTimestamps(t *testing.T) {
 
 func TestFIFOPolicyDoesNotMergeEarlierOrderIntoLaterTask(t *testing.T) {
 	paramtable.Init()
+	oldOrdering := paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue("true")
+	defer paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue(oldOrdering)
 	policy := newFIFOPolicy()
 	later := newMockTask(mockTaskConfig{
 		order:     TaskOrder{Timestamp: 20},
@@ -88,6 +112,58 @@ func TestFIFOPolicyDoesNotMergeEarlierOrderIntoLaterTask(t *testing.T) {
 	assert.Equal(t, 1, added)
 	assert.Equal(t, 2, policy.Len())
 	assert.Equal(t, earlier.Order(), policy.Pop(time.Now()).Order())
+}
+
+func TestFIFOPolicyMergesEarlierTimestampWhenOrderingDisabled(t *testing.T) {
+	paramtable.Init()
+	oldOrdering := paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue("false")
+	defer paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue(oldOrdering)
+	policy := newFIFOPolicy()
+	later := newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 20}, mergeAble: true, nq: 1})
+	earlier := newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 10}, mergeAble: true, nq: 1})
+	added, err := policy.Push(newQueuedTask(later, time.Now()))
+	assert.NoError(t, err)
+	assert.Equal(t, 1, added)
+	added, err = policy.Push(newQueuedTask(earlier, time.Now()))
+	assert.NoError(t, err)
+	assert.Zero(t, added)
+	assert.Equal(t, 1, policy.Len())
+	assert.Equal(t, int64(2), policy.Pop(time.Now()).NQ())
+}
+
+func TestFIFOPolicySwitchRestoresArrivalOrder(t *testing.T) {
+	paramtable.Init()
+	oldOrdering := paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue("false")
+	defer paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue(oldOrdering)
+	policy := newFIFOPolicy().(*fifoPolicy)
+	now := time.Now()
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tasks := []Task{
+		newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 30}}),
+		newMockTask(mockTaskConfig{ctx: canceledCtx, order: TaskOrder{Timestamp: 5}}),
+		newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 10}}),
+		newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 20}}),
+		newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 10}}),
+	}
+	for _, task := range tasks {
+		_, err := policy.Push(newQueuedTask(task, now))
+		assert.NoError(t, err)
+	}
+	cancel()
+	assert.Len(t, policy.Cleanup(now), 1)
+	policy.setTimestampOrdering(true)
+	assert.Same(t, tasks[2], policy.Pop(now).Task)
+	policy.setTimestampOrdering(false)
+	// A new arrival must stay behind all survivors, even with an earlier Proxy timestamp.
+	newTask := newMockTask(mockTaskConfig{order: TaskOrder{Timestamp: 1}})
+	_, err := policy.Push(newQueuedTask(newTask, now))
+	assert.NoError(t, err)
+	assert.Equal(t, 4, policy.Len())
+	for _, task := range []Task{tasks[0], tasks[3], tasks[4], newTask} {
+		assert.Same(t, task, policy.Pop(now).Task)
+	}
+	assert.Zero(t, policy.Len())
 }
 
 func TestPolicyCleanupExpiredTasks(t *testing.T) {

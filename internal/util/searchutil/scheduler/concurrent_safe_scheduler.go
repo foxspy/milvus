@@ -51,6 +51,10 @@ type addTaskReq struct {
 	err  chan<- error
 }
 
+type timestampOrderingUpdate struct {
+	done chan struct{}
+}
+
 // scheduler is a general concurrent safe scheduler implementation by wrapping a schedule policy.
 type scheduler struct {
 	policy      schedulePolicy
@@ -58,6 +62,9 @@ type scheduler struct {
 	execChan    chan Task
 	pool        *conc.Pool[any]
 	gpuPool     *conc.Pool[any]
+
+	orderingUpdates chan timestampOrderingUpdate
+	orderingHandler config.EventHandler
 
 	searchLatencies executionLatencyWindow
 	queryLatencies  executionLatencyWindow
@@ -105,6 +112,9 @@ func (s *scheduler) Add(task Task) (err error) {
 // Start schedule the owned task asynchronously and continuously.
 // Start should be only call once.
 func (s *scheduler) Start() {
+	if _, ok := s.policy.(*fifoPolicy); ok {
+		s.orderingUpdates = make(chan timestampOrderingUpdate)
+	}
 	s.wg.Add(2)
 
 	// Start a background task executing loop.
@@ -114,11 +124,12 @@ func (s *scheduler) Start() {
 	go s.schedule()
 
 	s.lifetime.SetState(lifetime.Working)
+	s.watchTimestampOrdering()
 }
 
 func (s *scheduler) Stop() {
 	s.lifetime.SetState(lifetime.Stopped)
-	// wait all accepted Add done
+	// Wait for accepted Add calls and ordering updates before stopping the loop.
 	s.lifetime.Wait()
 	// close receiveChan start stopping process for `schedule`
 	close(s.receiveChan)
@@ -131,6 +142,38 @@ func (s *scheduler) Stop() {
 		s.gpuPool.Release()
 	}
 	s.unwatchDynamicDeadline()
+	if s.orderingHandler != nil {
+		paramtable.Get().Unwatch(paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.Key, s.orderingHandler)
+	}
+}
+
+func (s *scheduler) watchTimestampOrdering() {
+	if s.orderingUpdates == nil {
+		return
+	}
+	update := func() {
+		if err := s.lifetime.Add(lifetime.IsWorking); err != nil {
+			return
+		}
+		defer s.lifetime.Done()
+		req := timestampOrderingUpdate{done: make(chan struct{})}
+		s.orderingUpdates <- req
+		<-req.done
+	}
+	s.orderingHandler = config.NewHandler(fmt.Sprintf("qn.scheduler.timestampOrdering.%p", s), func(*config.Event) { update() })
+	paramtable.Get().Watch(paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.Key, s.orderingHandler)
+	// Apply changes made between construction and Start, including events that
+	// raced with registering the handler. The loop is running before we wait.
+	update()
+}
+
+func (s *scheduler) applyTimestampOrdering(req timestampOrderingUpdate) {
+	// Read the latest effective value on the queue's owning goroutine. Reading
+	// here also prevents concurrent config callbacks from applying stale values.
+	// Conversion caches can still contain the old value during event dispatch.
+	enabled, _ := strconv.ParseBool(paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.GetValue())
+	s.policy.(*fifoPolicy).setTimestampOrdering(enabled)
+	close(req.done)
 }
 
 func (s *scheduler) watchDynamicDeadline() {
@@ -179,6 +222,8 @@ func (s *scheduler) schedule() {
 		}
 
 		select {
+		case req := <-s.orderingUpdates:
+			s.applyTimestampOrdering(req)
 		case req, ok := <-s.receiveChan:
 			if !ok {
 				log.Info("receiveChan closed, processing remaining request")
@@ -270,6 +315,8 @@ func (s *scheduler) produceExecChan() {
 		}
 
 		select {
+		case req := <-s.orderingUpdates:
+			s.applyTimestampOrdering(req)
 		case execChan <- execTask:
 			s.removeScheduledTask(task, time.Now())
 		default:

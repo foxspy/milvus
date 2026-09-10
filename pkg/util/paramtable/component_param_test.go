@@ -869,6 +869,21 @@ func TestComponentParam(t *testing.T) {
 	})
 }
 
+func TestQueryNodeTimestampOrderingConfig(t *testing.T) {
+	Init()
+	params := Get()
+	enabled := &params.QueryNodeCfg.EnableTimestampOrdering
+	defer params.Reset(enabled.Key)
+	field, ok := reflect.TypeOf(params.QueryNodeCfg).FieldByName("EnableTimestampOrdering")
+	assert.True(t, ok)
+	assert.Equal(t, "true", field.Tag.Get("refreshable"))
+	assert.False(t, enabled.GetAsBool())
+	assert.NoError(t, params.Save(enabled.Key, "true"))
+	assert.True(t, enabled.GetAsBool())
+	assert.NoError(t, params.Save(enabled.Key, "false"))
+	assert.False(t, enabled.GetAsBool())
+}
+
 func TestQueryNodeDynamicDeadlineConfig(t *testing.T) {
 	Init()
 	params := Get()

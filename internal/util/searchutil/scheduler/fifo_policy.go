@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"sort"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -10,16 +11,41 @@ var _ schedulePolicy = &fifoPolicy{}
 
 // newFIFOPolicy create a new fifo schedule policy.
 func newFIFOPolicy() schedulePolicy {
-	return &fifoPolicy{
-		queue: newMergeTaskQueueWithOrder("", func(left, right *queuedTask) bool {
-			return left.Order().Before(right.Order())
-		}),
+	p := &fifoPolicy{
+		queue: newMergeTaskQueue(""),
 	}
+	p.setTimestampOrdering(paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.GetAsBool())
+	return p
 }
 
 // fifoPolicy is a fifo policy with merge queue.
 type fifoPolicy struct {
-	queue *mergeTaskQueue
+	queue        *mergeTaskQueue
+	nextSequence uint64
+}
+
+// After initialization, setTimestampOrdering must run on the scheduler goroutine,
+// between dispatches.
+// Keeping arrival sequences lets disabling the switch restore FIFO even when
+// several tasks were enqueued with the same batch timestamp.
+func (p *fifoPolicy) setTimestampOrdering(enabled bool) {
+	if enabled == (p.queue.less != nil) {
+		return
+	}
+	p.queue.compactRemoved()
+	if enabled {
+		p.queue.less = func(left, right *queuedTask) bool {
+			return left.Order().Before(right.Order())
+		}
+		sort.SliceStable(p.queue.tasks, func(i, j int) bool {
+			return p.queue.less(p.queue.tasks[i], p.queue.tasks[j])
+		})
+	} else {
+		p.queue.less = nil
+		sort.Slice(p.queue.tasks, func(i, j int) bool {
+			return p.queue.tasks[i].arrivalSequence < p.queue.tasks[j].arrivalSequence
+		})
+	}
 }
 
 func (p *fifoPolicy) Cleanup(now time.Time) []*queuedTask {
@@ -41,6 +67,8 @@ func (p *fifoPolicy) Push(task *queuedTask) (int, error) {
 	}
 
 	// Add a new task into queue.
+	task.arrivalSequence = p.nextSequence
+	p.nextSequence++
 	p.queue.push(task)
 	return 1, nil
 }

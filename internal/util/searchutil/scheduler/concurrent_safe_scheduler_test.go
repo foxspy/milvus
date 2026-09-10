@@ -378,6 +378,8 @@ func (s *SchedulerSuite) TestSetupExecListenerRecordsPoppedExpiredTask() {
 }
 
 func (s *SchedulerSuite) TestSetupExecListenerKeepsTaskReorderableUntilDispatch() {
+	oldOrdering := paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue("true")
+	defer paramtable.Get().QueryNodeCfg.EnableTimestampOrdering.SwapTempValue(oldOrdering)
 	now := time.Now()
 	scheduler := &scheduler{
 		policy:           newFIFOPolicy(),

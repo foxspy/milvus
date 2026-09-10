@@ -97,6 +97,8 @@ type queuedTask struct {
 	Task
 
 	enqueueTime time.Time
+	// arrivalSequence preserves FIFO order across timestamp ordering switches.
+	arrivalSequence uint64
 }
 
 func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {
