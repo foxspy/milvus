@@ -3442,9 +3442,9 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	StrictGroupAcceptanceThreshold ParamItem `refreshable:"true"`
-	StrictGroupProbeCandidates     ParamItem `refreshable:"true"`
-	SoPath                         ParamItem `refreshable:"false"`
+	EnableSearchPath  ParamItem `refreshable:"true"`
+	EnableSearchPathK ParamItem `refreshable:"true"`
+	SoPath            ParamItem `refreshable:"false"`
 
 	// stats
 	// Deprecated: Never used
@@ -3638,18 +3638,18 @@ func formatDurationWithMillisecondFallback(v string) string {
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
-	p.StrictGroupAcceptanceThreshold = ParamItem{
-		Key:     "queryNode.groupBy.strictGroupAcceptanceThreshold",
-		Version: "2.6.23", DefaultValue: "0.1", Export: true,
-		Doc: "Recreate a strict group iterator only below this acceptance ratio [0,1]. Zero disables the optimization.",
+	p.EnableSearchPath = ParamItem{
+		Key: "queryNode.groupBy.enable_search_path", Version: "2.6.23",
+		DefaultValue: "false", Export: true,
+		Doc: "Use a pre-filter Search per selected group for eligible strict group-by requests.",
 	}
-	p.StrictGroupAcceptanceThreshold.Init(base.mgr)
-	p.StrictGroupProbeCandidates = ParamItem{
-		Key:     "queryNode.groupBy.strictGroupProbeCandidates",
-		Version: "2.6.23", DefaultValue: "100", Export: true,
-		Doc: "Positive consumer candidate budget after locking strict groups, not a backend graph visit budget.",
+	p.EnableSearchPath.Init(base.mgr)
+	p.EnableSearchPathK = ParamItem{
+		Key: "queryNode.groupBy.enable_search_path_k", Version: "2.6.23",
+		DefaultValue: "1", Export: true,
+		Doc: "Minimum number of groups (topK) for the strict group search path; must be positive.",
 	}
-	p.StrictGroupProbeCandidates.Init(base.mgr)
+	p.EnableSearchPathK.Init(base.mgr)
 	p.IDFPreload = ParamItem{
 		Key:          "queryNode.idfOracle.preload",
 		Version:      "2.6.8",

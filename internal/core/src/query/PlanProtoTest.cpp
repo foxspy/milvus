@@ -22,6 +22,7 @@
 #include "pb/schema.pb.h"
 #include "query/Plan.h"
 #include "query/PlanProto.h"
+#include "query/Utils.h"
 
 TEST(PlanProto, NotSetUnsupported) {
     using namespace milvus;
@@ -114,32 +115,35 @@ TEST(PlanProto, StrictGroupSettings) {
     info->set_metric_type("L2");
     info->set_topk(10);
     info->set_round_decimal(-1);
+    info->set_group_by_field_id(pk.get());
+    info->set_group_size(3);
+    info->set_strict_group_size(true);
     for (
         const auto& params :
         {R"({"nprobe":128})",
-         R"({"nprobe":128,"strict_group_acceptance_threshold":0,"strict_group_probe_candidates":1})",
-         R"({"nprobe":128,"strict_group_acceptance_threshold":0.1,"strict_group_probe_candidates":100})",
-         R"({"nprobe":128,"strict_group_acceptance_threshold":0.5,"strict_group_probe_candidates":17})",
-         R"({"nprobe":128,"strict_group_acceptance_threshold":1,"strict_group_probe_candidates":9223372036854775807})"}) {
+         R"({"nprobe":128,"enable_search_path":false,"enable_search_path_k":1})",
+         R"({"nprobe":128,"enable_search_path":true,"enable_search_path_k":1})",
+         R"({"nprobe":128,"enable_search_path":true,"enable_search_path_k":100})",
+         R"({"nprobe":128,"enable_search_path":true,"enable_search_path_k":17})",
+         R"({"nprobe":128,"enable_search_path":true,"enable_search_path_k":9223372036854775807})"}) {
         info->set_search_params(params);
         auto parsed = query::ProtoParser(schema).PlanNodeFromProto(node);
         const auto& search = parsed->search_info_;
-        EXPECT_DOUBLE_EQ(search.strict_group_acceptance_threshold_,
-                         knowhere::Json::parse(params).value(
-                             kStrictGroupAcceptanceThreshold, 0.1));
-        EXPECT_FALSE(
-            search.search_params_.contains(kStrictGroupAcceptanceThreshold));
-        EXPECT_EQ(search.strict_group_probe_candidates_,
-                  knowhere::Json::parse(params).value(
-                      kStrictGroupProbeCandidates, int64_t(100)));
-        EXPECT_FALSE(
-            search.search_params_.contains(kStrictGroupProbeCandidates));
+        EXPECT_EQ(
+            search.enable_search_path_,
+            knowhere::Json::parse(params).value(kEnableSearchPath, false));
+        EXPECT_FALSE(search.search_params_.contains(kEnableSearchPath));
+        EXPECT_EQ(search.enable_search_path_k_,
+                  knowhere::Json::parse(params).value(kEnableSearchPathK,
+                                                      int64_t(1)));
+        EXPECT_FALSE(search.search_params_.contains(kEnableSearchPathK));
         EXPECT_EQ(search.search_params_["nprobe"], 128);
+        EXPECT_EQ(query::CanUseStrictGroupSearch(search, 1),
+                  search.enable_search_path_ &&
+                      search.topk_ >= search.enable_search_path_k_);
     }
-    for (const auto& key :
-         {kStrictGroupAcceptanceThreshold, kStrictGroupProbeCandidates}) {
+    for (const auto& key : {kEnableSearchPath, kEnableSearchPathK}) {
         for (const auto& value : {knowhere::Json(nullptr),
-                                  knowhere::Json(true),
                                   knowhere::Json("0.5"),
                                   knowhere::Json("NaN"),
                                   knowhere::Json::array(),
@@ -155,12 +159,22 @@ TEST(PlanProto, StrictGroupSettings) {
             }
         }
     }
-    for (const auto& value : {knowhere::Json(0),
+    for (const auto& value : {knowhere::Json(true),
+                              knowhere::Json(0),
                               knowhere::Json(1.0),
                               knowhere::Json(uint64_t(1) << 63)}) {
         info->set_search_params(
-            knowhere::Json{{kStrictGroupProbeCandidates, value}}.dump());
+            knowhere::Json{{kEnableSearchPathK, value}}.dump());
         EXPECT_THROW(query::ProtoParser(schema).PlanNodeFromProto(node),
                      SegcoreError);
     }
+    info->set_group_by_field_id(-1);
+    info->set_strict_group_size(false);
+    info->set_search_params("null");
+    EXPECT_NO_THROW(query::ProtoParser(schema).PlanNodeFromProto(node));
+    info->set_search_params(
+        R"({"strict_group_acceptance_threshold":0.1,"strict_group_probe_candidates":100})");
+    auto legacy = query::ProtoParser(schema).PlanNodeFromProto(node);
+    EXPECT_TRUE(legacy->search_info_.search_params_.empty());
+    EXPECT_FALSE(legacy->search_info_.enable_search_path_);
 }

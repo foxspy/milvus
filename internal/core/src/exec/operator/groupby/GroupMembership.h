@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -25,16 +26,18 @@
 
 namespace milvus::exec {
 
-// `base_filter` uses vector-search semantics: one means invalid. The returned
-// membership bitmap uses scalar-index semantics: one means that the eligible
-// row belongs to one of the requested groups.
+// Prepare once for all locked labels. Raw fields are scanned once into row
+// lists; scalar indexes are pinned once and queried one label at a time.
+// The callback fills a reusable exclusion bitmap (one means invalid).
+using GroupMembershipFilter = std::function<bool(size_t, TargetBitmap&)>;
+
 template <typename T>
-std::optional<TargetBitmap>
-BuildGroupMembership(milvus::OpContext* op_ctx,
-                     const segcore::SegmentInternalInterface& segment,
-                     FieldId field_id,
-                     int64_t row_count,
-                     const std::vector<std::optional<T>>& groups,
-                     const TargetBitmap* base_filter);
+std::optional<GroupMembershipFilter>
+PrepareGroupMembership(milvus::OpContext* op_ctx,
+                       const segcore::SegmentInternalInterface& segment,
+                       FieldId field_id,
+                       int64_t row_count,
+                       const std::vector<std::optional<T>>& groups,
+                       const TargetBitmap* base_filter);
 
 }  // namespace milvus::exec

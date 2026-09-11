@@ -41,31 +41,27 @@ namespace {
 void
 ParseStrictGroupSettings(SearchInfo& info) {
     auto& params = info.search_params_;
-    if (auto it = params.find(kStrictGroupAcceptanceThreshold);
-        it != params.end()) {
-        if (!it->is_number()) {
-            ThrowInfo(InvalidParameter,
-                      "strict group acceptance must be numeric");
+    if (params.is_object()) {
+        params.erase("strict_group_acceptance_threshold");
+        params.erase("strict_group_probe_candidates");
+    }
+    if (auto it = params.find(kEnableSearchPath); it != params.end()) {
+        if (!it->is_boolean()) {
+            ThrowInfo(InvalidParameter, "enable_search_path must be boolean");
         }
-        auto value = it->get<double>();
-        if (!std::isfinite(value) || value < 0 || value > 1) {
-            ThrowInfo(InvalidParameter,
-                      "strict group acceptance must be in [0,1]");
-        }
-        info.strict_group_acceptance_threshold_ = value;
+        info.enable_search_path_ = it->get<bool>();
         params.erase(it);
     }
-    if (auto it = params.find(kStrictGroupProbeCandidates);
-        it != params.end()) {
+    if (auto it = params.find(kEnableSearchPathK); it != params.end()) {
         if (!it->is_number_integer() ||
             (it->is_number_unsigned() &&
              it->get<uint64_t>() >
                  static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) ||
             it->get<int64_t>() <= 0) {
             ThrowInfo(InvalidParameter,
-                      "strict group probe must be a positive int64");
+                      "enable_search_path_k must be a positive int64");
         }
-        info.strict_group_probe_candidates_ = it->get<int64_t>();
+        info.enable_search_path_k_ = it->get<int64_t>();
         params.erase(it);
     }
 }

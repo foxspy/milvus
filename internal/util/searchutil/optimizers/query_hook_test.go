@@ -245,8 +245,8 @@ func TestOptimizeSearchParam(t *testing.T) {
 func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 	paramtable.Init()
 	cfg := paramtable.Get()
-	vKey := cfg.QueryNodeCfg.StrictGroupAcceptanceThreshold.Key
-	tKey := cfg.QueryNodeCfg.StrictGroupProbeCandidates.Key
+	vKey := cfg.QueryNodeCfg.EnableSearchPath.Key
+	tKey := cfg.QueryNodeCfg.EnableSearchPathK.Key
 	defer cfg.Reset(vKey)
 	defer cfg.Reset(tKey)
 	defer cfg.Reset(cfg.AutoIndexConfig.Enable.Key)
@@ -268,7 +268,7 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 		suite.Require().NoError(json.Unmarshal([]byte(p.GetVectorAnns().GetQueryInfo().GetSearchParams()), &values))
 		return values
 	}
-	raw := `{"large":9007199254740993,"text":"0.5","strict_group_acceptance_threshold":"bad","strict_group_probe_candidates":-1}`
+	raw := `{"large":9007199254740993,"text":"0.5","enable_search_path":"bad","enable_search_path_k":-1,"strict_group_acceptance_threshold":0.5,"strict_group_probe_candidates":100}`
 	// Exercise no hook, AutoIndex disabled, a hook dropping all caller keys,
 	// and a hook injecting conflicting/invalid values.
 	for _, enabled := range []string{"false", "true"} {
@@ -284,36 +284,38 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 				}
 				hook = h
 			}
-			cfg.Save(vKey, "0.5")
+			cfg.Save(vKey, "true")
 			cfg.Save(tKey, "17")
 			req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), hook, 1)
 			suite.Require().NoError(err)
 			values := readParams(req)
-			suite.Equal("0.5", string(values[common.StrictGroupAcceptanceThresholdKey]))
-			suite.Equal("17", string(values[common.StrictGroupProbeCandidatesKey]))
+			suite.NotContains(values, "strict_group_acceptance_threshold")
+			suite.NotContains(values, "strict_group_probe_candidates")
+			suite.Equal("true", string(values[common.EnableSearchPathKey]))
+			suite.Equal("17", string(values[common.EnableSearchPathKKey]))
 			suite.Equal("9007199254740993", string(values["large"]))
 			suite.Equal(`"0.5"`, string(values["text"]))
 			// Updating config affects a later request, not the serialized snapshot.
-			cfg.Save(vKey, "0")
+			cfg.Save(vKey, "false")
 			cfg.Save(tKey, "1")
 			next, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1)
 			suite.Require().NoError(err)
-			suite.Equal("0", string(readParams(next)[common.StrictGroupAcceptanceThresholdKey]))
-			suite.Equal("1", string(readParams(next)[common.StrictGroupProbeCandidatesKey]))
-			suite.Equal("17", string(readParams(req)[common.StrictGroupProbeCandidatesKey]))
+			suite.Equal("false", string(readParams(next)[common.EnableSearchPathKey]))
+			suite.Equal("1", string(readParams(next)[common.EnableSearchPathKKey]))
+			suite.Equal("17", string(readParams(req)[common.EnableSearchPathKKey]))
 		}
 	}
 	cfg.Reset(vKey)
 	cfg.Reset(tKey)
 	defaultReq, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1)
 	suite.Require().NoError(err)
-	suite.Equal("0.1", string(readParams(defaultReq)[common.StrictGroupAcceptanceThresholdKey]))
-	suite.Equal("100", string(readParams(defaultReq)[common.StrictGroupProbeCandidatesKey]))
+	suite.Equal("false", string(readParams(defaultReq)[common.EnableSearchPathKey]))
+	suite.Equal("1", string(readParams(defaultReq)[common.EnableSearchPathKKey]))
 	// Caller-controlled values are removed even on non-strict queries.
 	plain, err := OptimizeSearchParams(context.Background(), makeRequest(false, raw), nil, 1)
 	suite.Require().NoError(err)
-	suite.NotContains(readParams(plain), common.StrictGroupAcceptanceThresholdKey)
-	suite.NotContains(readParams(plain), common.StrictGroupProbeCandidatesKey)
+	suite.NotContains(readParams(plain), common.EnableSearchPathKey)
+	suite.NotContains(readParams(plain), common.EnableSearchPathKKey)
 	for key, badValues := range map[string][]string{
 		vKey: {"-0.1", "1.1", "NaN", "+Inf", "bad"},
 		tKey: {"0", "-1", "1.5", "9223372036854775808", "bad"},

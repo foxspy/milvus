@@ -99,51 +99,49 @@ CollectIteratorResults(const std::shared_ptr<VectorIterator>& iterator,
 }
 
 void
-AssertMatchesDirectFilteredIterator(const SearchResult& direct_result,
-                                    const IteratorResults& recreated_results) {
-    ASSERT_TRUE(direct_result.vector_iterators_.has_value());
-    ASSERT_EQ(direct_result.vector_iterators_->size(), 1);
-    IteratorResults direct_results;
-    CollectIteratorResults(direct_result.vector_iterators_->at(0),
-                           direct_results);
-    EXPECT_EQ(recreated_results, direct_results);
+AssertMatchesDirectFilteredSearch(const SearchResult& direct,
+                                  const IteratorResults& searched) {
+    ASSERT_FALSE(direct.vector_iterators_.has_value());
+    IteratorResults expected;
+    for (size_t i = 0; i < direct.seg_offsets_.size(); ++i) {
+        if (direct.seg_offsets_[i] != INVALID_SEG_OFFSET) {
+            expected.emplace_back(direct.seg_offsets_[i], direct.distances_[i]);
+        }
+    }
+    EXPECT_EQ(searched, expected);
 }
 
 template <typename IsValid>
 void
-AssertRecreatedIteratorUsesCombinedLogicalFilter(
+AssertGroupSearchUsesCombinedLogicalFilter(
     SearchResult& search_result,
     const std::vector<uint8_t>& base_filter,
     const TargetBitmap& additional_filter,
     IsValid&& is_valid,
     IteratorResults& observed_results) {
-    ASSERT_TRUE(search_result.CanRecreateVectorIterator());
+    ASSERT_TRUE(search_result.CanSearchGroups());
     auto original_pinned_bitsets = search_result.pinned_bitsets_.size();
     auto original_chunk_buffers = search_result.chunk_buffers_.size();
     {
-        auto recreated =
-            search_result.RecreateVectorIterators(additional_filter.clone());
-        ASSERT_TRUE(recreated.has_value());
-        auto& batch_result = **recreated;
-        EXPECT_FALSE(batch_result.CanRecreateVectorIterator());
-        EXPECT_FALSE(batch_result.pinned_bitsets_.empty());
-        ASSERT_TRUE(batch_result.vector_iterators_.has_value());
-        ASSERT_EQ(batch_result.vector_iterators_->size(), 1);
-
-        auto iterator = batch_result.vector_iterators_->at(0);
-        ASSERT_NE(iterator, nullptr);
+        auto filter = additional_filter.clone();
+        auto searched = search_result.SearchGroup(filter);
+        ASSERT_TRUE(searched.has_value());
+        const auto& batch = **searched;
+        EXPECT_FALSE(batch.CanSearchGroups());
+        EXPECT_FALSE(batch.vector_iterators_.has_value());
+        EXPECT_EQ(batch.unity_topK_, 3);
         int64_t result_count = 0;
-        while (iterator->HasNext() && result_count < kTopK) {
-            auto result = iterator->Next();
-            ASSERT_TRUE(result.has_value());
-            auto logical_offset = result->first;
+        for (size_t i = 0; i < batch.seg_offsets_.size(); ++i) {
+            auto logical_offset = batch.seg_offsets_[i];
+            if (logical_offset == INVALID_SEG_OFFSET)
+                continue;
             ASSERT_GE(logical_offset, 0);
             ASSERT_LT(logical_offset,
                       static_cast<int64_t>(additional_filter.size()));
             EXPECT_FALSE(IsFiltered(base_filter, logical_offset));
             EXPECT_FALSE(additional_filter[logical_offset]);
             EXPECT_TRUE(is_valid(logical_offset));
-            observed_results.emplace_back(result.value());
+            observed_results.emplace_back(logical_offset, batch.distances_[i]);
             ++result_count;
         }
         ASSERT_GT(result_count, 0);
@@ -189,6 +187,7 @@ MakeGroupBySearchInfo(FieldId vector_field,
     search_info.group_by_field_id_ = group_by_field;
     search_info.group_size_ = 3;
     search_info.strict_group_size_ = true;
+    search_info.enable_search_path_ = true;
     return search_info;
 }
 
@@ -276,11 +275,12 @@ std::unique_ptr<index::IndexBase>
 BuildNullableVectorIndex(int64_t total_count,
                          int64_t dim,
                          const bool* valid_data,
-                         const std::vector<float>& vectors) {
+                         const std::vector<float>& vectors,
+                         const std::string& index_type) {
     index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_FLOAT;
     create_index_info.metric_type = knowhere::metric::COSINE;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    create_index_info.index_type = index_type;
     create_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
 
@@ -299,6 +299,10 @@ BuildNullableVectorIndex(int64_t total_count,
         {knowhere::meta::DIM, std::to_string(dim)},
         {knowhere::indexparam::NLIST, "128"},
     };
+    if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
+        build_conf["M"] = 16;
+        build_conf["efConstruction"] = 64;
+    }
     index_base->BuildWithDataset(build_dataset, build_conf);
     vector_index->BuildValidData(valid_data, total_count);
     return index_base;
@@ -306,8 +310,17 @@ BuildNullableVectorIndex(int64_t total_count,
 
 }  // namespace
 
-TEST(SearchOnSealedIndexBitsetLifetime,
-     GroupByIteratorMustNotKeepDanglingTransformedBitset) {
+class SearchOnSealedIndexBitsetLifetime
+    : public testing::TestWithParam<std::string> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    Indexes,
+    SearchOnSealedIndexBitsetLifetime,
+    testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                    knowhere::IndexEnum::INDEX_HNSW));
+
+TEST_P(SearchOnSealedIndexBitsetLifetime,
+       GroupByIteratorMustNotKeepDanglingTransformedBitset) {
     constexpr int64_t total_count = 10000;
 
     int64_t valid_count = 0;
@@ -320,8 +333,8 @@ TEST(SearchOnSealedIndexBitsetLifetime,
     auto group_by_field = schema->AddDebugField("group_by", DataType::INT8);
     schema->set_primary_field_id(group_by_field);
 
-    auto index_base =
-        BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
+    auto index_base = BuildNullableVectorIndex(
+        total_count, kDim, valid_data.get(), vectors, GetParam());
     auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
     ASSERT_NE(vector_index, nullptr);
     ASSERT_TRUE(vector_index->GetOffsetMapping().IsEnabled());
@@ -354,7 +367,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
     auto additional_filter = MakeAdditionalFilter(total_count);
     IteratorResults recreated_results;
-    AssertRecreatedIteratorUsesCombinedLogicalFilter(
+    AssertGroupSearchUsesCombinedLogicalFilter(
         search_result,
         logical_bitset_bytes,
         additional_filter,
@@ -364,16 +377,17 @@ TEST(SearchOnSealedIndexBitsetLifetime,
     auto combined_filter =
         MakeCombinedFilter(logical_bitset_bytes, additional_filter);
     SearchResult direct_result;
+    auto direct_info = search_info.ForGroupSearch();
     SearchOnSealedIndex(*schema,
                         indexing_record,
-                        search_info,
+                        direct_info,
                         query.data(),
                         nullptr,
                         1,
                         BitsetView(combined_filter),
                         nullptr,
                         direct_result);
-    AssertMatchesDirectFilteredIterator(direct_result, recreated_results);
+    AssertMatchesDirectFilteredSearch(direct_result, recreated_results);
 
     auto non_strict_search_info = search_info;
     non_strict_search_info.strict_group_size_ = false;
@@ -387,7 +401,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         logical_bitset,
                         nullptr,
                         non_strict_result);
-    EXPECT_FALSE(non_strict_result.CanRecreateVectorIterator());
+    EXPECT_FALSE(non_strict_result.CanSearchGroups());
 
     auto single_group_result_search_info = search_info;
     single_group_result_search_info.group_size_ = 1;
@@ -401,7 +415,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         logical_bitset,
                         nullptr,
                         single_group_result);
-    EXPECT_FALSE(single_group_result.CanRecreateVectorIterator());
+    EXPECT_FALSE(single_group_result.CanSearchGroups());
 
     std::vector<float> two_queries = query;
     two_queries.insert(two_queries.end(), query.begin(), query.end());
@@ -415,7 +429,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         logical_bitset,
                         nullptr,
                         multiple_query_result);
-    EXPECT_FALSE(multiple_query_result.CanRecreateVectorIterator());
+    EXPECT_FALSE(multiple_query_result.CanSearchGroups());
 }
 
 TEST(SearchOnSealedIndexNullableNoFilter,
@@ -434,7 +448,11 @@ TEST(SearchOnSealedIndexNullableNoFilter,
     schema->set_primary_field_id(pk_field);
 
     auto index_base =
-        BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
+        BuildNullableVectorIndex(total_count,
+                                 kDim,
+                                 valid_data.get(),
+                                 vectors,
+                                 knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
     auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
     ASSERT_NE(vector_index, nullptr);
     ASSERT_TRUE(vector_index->GetOffsetMapping().IsEnabled());
@@ -491,7 +509,11 @@ TEST(SearchOnSealedIndexNullableIteratorNoFilter,
     schema->set_primary_field_id(pk_field);
 
     auto index_base =
-        BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
+        BuildNullableVectorIndex(total_count,
+                                 kDim,
+                                 valid_data.get(),
+                                 vectors,
+                                 knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
     segcore::SealedIndexingRecord indexing_record;
     indexing_record.append_field_indexing(
         vector_field,
@@ -589,7 +611,7 @@ TEST(SearchOnGrowingBitsetLifetime,
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
     auto additional_filter = MakeAdditionalFilter(total_count);
     IteratorResults recreated_results;
-    AssertRecreatedIteratorUsesCombinedLogicalFilter(
+    AssertGroupSearchUsesCombinedLogicalFilter(
         search_result,
         logical_bitset_bytes,
         additional_filter,
@@ -599,8 +621,9 @@ TEST(SearchOnGrowingBitsetLifetime,
     auto combined_filter =
         MakeCombinedFilter(logical_bitset_bytes, additional_filter);
     SearchResult direct_result;
+    auto direct_info = search_info.ForGroupSearch();
     SearchOnGrowing(*growing_segment,
-                    search_info,
+                    direct_info,
                     vectors.data(),
                     nullptr,
                     1,
@@ -608,7 +631,7 @@ TEST(SearchOnGrowingBitsetLifetime,
                     BitsetView(combined_filter),
                     nullptr,
                     direct_result);
-    AssertMatchesDirectFilteredIterator(direct_result, recreated_results);
+    AssertMatchesDirectFilteredSearch(direct_result, recreated_results);
 }
 
 TEST(SearchOnSealedColumnBitsetLifetime,
@@ -657,7 +680,7 @@ TEST(SearchOnSealedColumnBitsetLifetime,
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
     auto additional_filter = MakeAdditionalFilter(total_count);
     IteratorResults recreated_results;
-    AssertRecreatedIteratorUsesCombinedLogicalFilter(
+    AssertGroupSearchUsesCombinedLogicalFilter(
         search_result,
         logical_bitset_bytes,
         additional_filter,
@@ -667,9 +690,10 @@ TEST(SearchOnSealedColumnBitsetLifetime,
     auto combined_filter =
         MakeCombinedFilter(logical_bitset_bytes, additional_filter);
     SearchResult direct_result;
+    auto direct_info = search_info.ForGroupSearch();
     SearchOnSealedColumn(*schema,
                          column.get(),
-                         search_info,
+                         direct_info,
                          std::map<std::string, std::string>{},
                          vectors.data(),
                          nullptr,
@@ -678,7 +702,7 @@ TEST(SearchOnSealedColumnBitsetLifetime,
                          BitsetView(combined_filter),
                          nullptr,
                          direct_result);
-    AssertMatchesDirectFilteredIterator(direct_result, recreated_results);
+    AssertMatchesDirectFilteredSearch(direct_result, recreated_results);
 }
 
 }  // namespace milvus::query

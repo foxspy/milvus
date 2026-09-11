@@ -82,31 +82,31 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 milvus::OpContext* op_context,
                 SearchResult& search_result) {
     const auto* segment_ptr = &segment;
-    auto register_vector_iterator_recreator = [&] {
-        if (!search_result.allow_vector_iterator_recreation_ ||
-            !CanUseStrictGroupFilteredIterator(info, num_queries) ||
+    auto register_group_search = [&] {
+        if (!search_result.allow_group_search_ ||
+            !CanUseStrictGroupSearch(info, num_queries) ||
             !search_result.vector_iterators_.has_value()) {
             return;
         }
-        search_result.SetVectorIteratorRecreator(
+        search_result.SetGroupSearch(
             bitset,
             [segment_ptr,
-             recreate_search_info = info,
+             group_search_info = info.ForGroupSearch(),
              query_data,
              query_offsets,
              num_queries,
              timestamp,
              op_context](const BitsetView& combined_filter,
-                         SearchResult& recreated_result) {
+                         SearchResult& group_result) {
                 SearchOnGrowing(*segment_ptr,
-                                recreate_search_info,
+                                group_search_info,
                                 query_data,
                                 query_offsets,
                                 num_queries,
                                 timestamp,
                                 combined_filter,
                                 op_context,
-                                recreated_result);
+                                group_result);
             });
     };
 
@@ -158,7 +158,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                     bitset,
                                     op_context,
                                     search_result);
-            register_vector_iterator_recreator();
+            register_group_search();
             return;
         }
         SubSearchResult final_qr(num_queries, topk, metric_type, round_decimal);
@@ -396,7 +396,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         search_result.unity_topK_ = topk;
         search_result.total_nq_ = num_queries;
     }
-    register_vector_iterator_recreator();
+    register_group_search();
 }
 
 }  // namespace milvus::query

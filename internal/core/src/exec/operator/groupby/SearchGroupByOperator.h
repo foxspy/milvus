@@ -271,15 +271,20 @@ class SealedDataGetter : public DataGetter<OutputType> {
                 return raw;
             }
         } else {
-            // null is not supported for indexed fields
             AssertInfo(index_ptr_.get() != nullptr,
                        "indexed field should have only one index");
             auto chunk_index =
                 dynamic_cast<const index::ScalarIndex<OutputType>*>(
                     index_ptr_.get());
-            auto raw = chunk_index->Reverse_Lookup(idx);
-            AssertInfo(raw.has_value(), "field data not found");
-            return raw.value();
+            AssertInfo(chunk_index != nullptr, "group index type mismatch");
+            auto count =
+                const_cast<index::ScalarIndex<OutputType>*>(chunk_index)
+                    ->Count();
+            AssertInfo(idx >= 0 && idx < count,
+                       "group offset {} is outside the scalar index",
+                       idx);
+            // Reverse_Lookup returns nullopt for a nullable group label.
+            return chunk_index->Reverse_Lookup(idx);
         }
     }
 };
@@ -461,19 +466,10 @@ class GroupByResultCollector {
         return results_.size();
     }
 
-    // Other groups (including full groups) are already excluded by membership.
-    // Accepted rows are the only consumed rows that could otherwise reappear.
     void
-    ExcludeAcceptedOffsets(TargetBitmap& invalid) const {
-        for (const auto& result : results_) {
-            const auto offset = std::get<0>(result);
-            AssertInfo(
-                offset >= 0 && static_cast<size_t>(offset) < invalid.size(),
-                "group-by result offset {} exceeds row count {}",
-                offset,
-                invalid.size());
-            invalid[offset] = true;
-        }
+    EnableBestGroupResults(int64_t group_size) {
+        best_group_size_ = group_size;
+        EnableOffsetDeduplication();
     }
 
     void
@@ -487,7 +483,14 @@ class GroupByResultCollector {
         };
         std::sort(results_.begin(), results_.end(), comparator);
 
+        std::unordered_set<int64_t> emitted;
+        std::unordered_map<GroupKey, int64_t> counts;
         for (auto& result : results_) {
+            if (best_group_size_ > 0 &&
+                (!emitted.insert(std::get<0>(result)).second ||
+                 counts[std::get<2>(result)]++ >= best_group_size_)) {
+                continue;
+            }
             offsets.emplace_back(std::get<0>(result));
             distances.emplace_back(std::get<1>(result));
             group_by_values.emplace_back(std::move(std::get<2>(result)));
@@ -496,6 +499,7 @@ class GroupByResultCollector {
     }
 
  private:
+    int64_t best_group_size_{0};
     std::vector<Result> results_;
     std::optional<std::unordered_set<int64_t>> accepted_offsets_;
 };

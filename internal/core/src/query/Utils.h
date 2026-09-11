@@ -27,9 +27,10 @@
 
 namespace milvus::query {
 inline bool
-CanUseStrictGroupFilteredIterator(const SearchInfo& search_info,
-                                  int64_t num_queries) {
-    return search_info.strict_group_acceptance_threshold_ > 0 &&
+CanUseStrictGroupSearch(const SearchInfo& search_info, int64_t num_queries) {
+    return search_info.enable_search_path_ &&
+           search_info.topk_ >= search_info.enable_search_path_k_ &&
+           search_info.group_by_field_id_.has_value() &&
            search_info.strict_group_size_ && search_info.group_size_ > 1 &&
            search_info.topk_ > 0 && num_queries == 1 &&
            search_info.array_offsets_ == nullptr;

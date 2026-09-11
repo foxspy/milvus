@@ -234,8 +234,7 @@ struct VectorIterator {
 };
 
 struct SearchResult {
-    using VectorIteratorRecreateFn =
-        std::function<void(const BitsetView&, SearchResult&)>;
+    using GroupSearchFn = std::function<void(const BitsetView&, SearchResult&)>;
 
     SearchResult() = default;
 
@@ -294,36 +293,34 @@ struct SearchResult {
     }
 
     void
-    SetVectorIteratorRecreator(const BitsetView& base_filter,
-                               VectorIteratorRecreateFn recreate_fn) {
-        vector_iterator_base_filter_.reset();
-        vector_iterator_base_filter_view_ = base_filter;
+    SetGroupSearch(const BitsetView& base_filter, GroupSearchFn search_fn) {
+        group_search_base_filter_.reset();
+        group_search_base_filter_view_ = base_filter;
         // The execution pipeline shares its input column. Direct low-level
         // callers without an owner retain the original defensive-copy contract.
-        if (!vector_iterator_filter_owner_) {
-            GetVectorIteratorBaseFilter();
+        if (!group_search_filter_owner_) {
+            GetGroupSearchBaseFilter();
         }
-        vector_iterator_recreate_fn_ = std::move(recreate_fn);
+        group_search_fn_ = std::move(search_fn);
     }
 
     void
-    ClearVectorIteratorRecreator() {
-        vector_iterator_recreate_fn_ = {};
-        vector_iterator_base_filter_view_ = {};
-        vector_iterator_base_filter_.reset();
-        vector_iterator_filter_owner_.reset();
+    ClearGroupSearch() {
+        group_search_fn_ = {};
+        group_search_base_filter_view_ = {};
+        group_search_base_filter_.reset();
+        group_search_filter_owner_.reset();
     }
 
     bool
-    CanRecreateVectorIterator() const {
-        return allow_vector_iterator_recreation_ &&
-               static_cast<bool>(vector_iterator_recreate_fn_);
+    CanSearchGroups() const {
+        return allow_group_search_ && static_cast<bool>(group_search_fn_);
     }
 
     const TargetBitmap*
-    GetVectorIteratorBaseFilter() {
-        const auto& base_filter = vector_iterator_base_filter_view_;
-        if (!vector_iterator_base_filter_ && !base_filter.empty()) {
+    GetGroupSearchBaseFilter() {
+        const auto& base_filter = group_search_base_filter_view_;
+        if (!group_search_base_filter_ && !base_filter.empty()) {
             auto copied_filter =
                 std::make_unique<TargetBitmap>(base_filter.size(), false);
             if (!base_filter.has_out_ids()) {
@@ -335,44 +332,31 @@ struct SearchResult {
                     (*copied_filter)[i] = base_filter.test(i);
                 }
             }
-            vector_iterator_base_filter_ = std::move(copied_filter);
-            vector_iterator_base_filter_view_ =
-                BitsetView(*vector_iterator_base_filter_);
+            group_search_base_filter_ = std::move(copied_filter);
+            group_search_base_filter_view_ =
+                BitsetView(*group_search_base_filter_);
         }
-        return vector_iterator_base_filter_.get();
+        return group_search_base_filter_.get();
     }
 
-    // The returned SearchResult owns every bitmap and raw chunk buffer used by
-    // its iterators. Keep it alive while consuming the batch, then release it
-    // before recreating the next batch.
+    // Search is synchronous; the caller may reuse its per-group filter once
+    // this method returns. Combine in logical row space before provider mapping.
     std::optional<std::unique_ptr<SearchResult>>
-    RecreateVectorIterators(TargetBitmap additional_filter) {
-        if (!CanRecreateVectorIterator()) {
+    SearchGroup(TargetBitmap& filter) {
+        if (!CanSearchGroups()) {
             return std::nullopt;
         }
-        GetVectorIteratorBaseFilter();
-        if (vector_iterator_base_filter_ != nullptr &&
-            vector_iterator_base_filter_->size() != additional_filter.size()) {
-            return std::nullopt;
+        const auto* base = GetGroupSearchBaseFilter();
+        if (base != nullptr) {
+            if (base->size() != filter.size()) {
+                return std::nullopt;
+            }
+            filter |= *base;
         }
-
-        auto combined_filter = std::move(additional_filter);
-        if (vector_iterator_base_filter_ != nullptr) {
-            combined_filter |= *vector_iterator_base_filter_;
-        }
-
-        auto recreated_result = std::make_unique<SearchResult>();
-        recreated_result->allow_vector_iterator_recreation_ = false;
-        auto combined_view =
-            recreated_result->PinBitset(std::move(combined_filter));
-        vector_iterator_recreate_fn_(combined_view, *recreated_result);
-        if (!recreated_result->vector_iterators_.has_value()) {
-            // The combined filter may exclude every row. The provider ran
-            // successfully, but there is no iterator to assemble.
-            recreated_result->vector_iterators_ =
-                std::vector<std::shared_ptr<VectorIterator>>{};
-        }
-        return recreated_result;
+        auto result = std::make_unique<SearchResult>();
+        result->allow_group_search_ = false;
+        group_search_fn_(BitsetView(filter), *result);
+        return result;
     }
 
  public:
@@ -409,14 +393,13 @@ struct SearchResult {
     StorageCost search_storage_cost_;
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
 
-    // Recreates the original vector iterator with an additional logical-row
-    // exclusion bitmap. The callback re-enters the same sealed/growing search
-    // provider so offset mapping and backend selection stay centralized there.
-    VectorIteratorRecreateFn vector_iterator_recreate_fn_{};
-    TargetBitmapPtr vector_iterator_base_filter_{};
-    BitsetView vector_iterator_base_filter_view_{};
-    std::shared_ptr<const void> vector_iterator_filter_owner_{};
-    bool allow_vector_iterator_recreation_{true};
+    // Runs an ordinary Search with a per-group logical-row exclusion bitmap.
+    // The original provider owns backend selection and offset mapping.
+    GroupSearchFn group_search_fn_{};
+    TargetBitmapPtr group_search_base_filter_{};
+    BitsetView group_search_base_filter_view_{};
+    std::shared_ptr<const void> group_search_filter_owner_{};
+    bool allow_group_search_{true};
 
     bool element_level_{false};
     std::vector<int32_t> element_indices_;

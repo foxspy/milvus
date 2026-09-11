@@ -14,6 +14,7 @@
 #include "query/Plan.h"
 
 #include "segcore/reduce_c.h"
+#include "monitor/Monitor.h"
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
 #include "test_utils/DataGen.h"
@@ -758,39 +759,43 @@ TEST(GroupBY, GrowingRawDataDeleteReinsertWithEmptyLeadingChunk) {
         EXPECT_EQ(delete_mask[i], i < chunk_rows);
     }
 
-    ScopedSchemaHandle handle(*schema);
-    auto plan_blob = handle.ParseGroupBySearch("",
-                                               "vec",
-                                               topk,
-                                               "L2",
-                                               "{}",
-                                               group_fid.get(),
-                                               group_size,
-                                               "",
-                                               proto::schema::DataType::None,
-                                               true);
-    auto plan =
-        CreateSearchPlanByExpr(schema, plan_blob.data(), plan_blob.size());
+    for (bool enabled : {false, true}) {
+        ScopedSchemaHandle handle(*schema);
+        auto plan_blob = handle.ParseGroupBySearch(
+            "",
+            "vec",
+            topk,
+            "L2",
+            enabled ? R"({"enable_search_path":true})" : "{}",
+            group_fid.get(),
+            group_size,
+            "",
+            proto::schema::DataType::None,
+            true);
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_blob.data(), plan_blob.size());
 
-    auto live_vectors = live_data.get_col<float>(vec_fid);
-    auto raw_ph = CreatePlaceholderGroupFromBlob(1, dim, live_vectors.data());
-    auto ph = ParsePlaceholderGroup(plan.get(), raw_ph.SerializeAsString());
-    auto result = growing->Search(plan.get(), ph.get(), MAX_TIMESTAMP);
+        auto live_vectors = live_data.get_col<float>(vec_fid);
+        auto raw_ph =
+            CreatePlaceholderGroupFromBlob(1, dim, live_vectors.data());
+        auto ph = ParsePlaceholderGroup(plan.get(), raw_ph.SerializeAsString());
+        auto result = growing->Search(plan.get(), ph.get(), MAX_TIMESTAMP);
 
-    CheckGroupBySearchResult(*result, topk, 1, true);
-    ASSERT_EQ(result->seg_offsets_.size(), 2 * topk);
-    auto offsets = result->seg_offsets_;
-    std::sort(offsets.begin(), offsets.end());
-    EXPECT_EQ(offsets, (std::vector<int64_t>{2, 3, 4, 5}));
+        CheckGroupBySearchResult(*result, topk, 1, true);
+        ASSERT_EQ(result->seg_offsets_.size(), 2 * topk);
+        auto offsets = result->seg_offsets_;
+        std::sort(offsets.begin(), offsets.end());
+        EXPECT_EQ(offsets, (std::vector<int64_t>{2, 3, 4, 5}));
 
-    std::unordered_map<bool, int> group_counts;
-    for (const auto& value : result->group_by_values_.value()) {
-        ASSERT_TRUE(value.has_value());
-        ASSERT_TRUE(std::holds_alternative<bool>(value.value()));
-        ++group_counts[std::get<bool>(value.value())];
+        std::unordered_map<bool, int> group_counts;
+        for (const auto& value : result->group_by_values_.value()) {
+            ASSERT_TRUE(value.has_value());
+            ASSERT_TRUE(std::holds_alternative<bool>(value.value()));
+            ++group_counts[std::get<bool>(value.value())];
+        }
+        EXPECT_EQ(group_counts[false], group_size);
+        EXPECT_EQ(group_counts[true], group_size);
     }
-    EXPECT_EQ(group_counts[false], group_size);
-    EXPECT_EQ(group_counts[true], group_size);
 }
 
 TEST(GroupBY, GrowingIndex) {
@@ -841,58 +846,70 @@ TEST(GroupBY, GrowingIndex) {
     }
 
     //2. Search group by int32
-    auto num_queries = 10;
-    auto topK = 100;
-    int group_size = 3;
+    for (auto num_queries : {10, 1}) {
+        auto topK = 100;
+        int group_size = 3;
 
-    // Create ScopedSchemaHandle for parsing expressions
-    ScopedSchemaHandle handle(*schema);
+        // Create ScopedSchemaHandle for parsing expressions
+        ScopedSchemaHandle handle(*schema);
 
-    auto plan_str = handle.ParseGroupBySearch(
-        "",                                     // empty filter expression
-        "embeddings",                           // vector field name
-        topK,                                   // topk
-        "L2",                                   // metric type
-        "{\"ef\": 10}",                         // search params
-        int32_field_id.get(),                   // group_by_field_id
-        group_size,                             // group_size
-        "",                                     // json_path (not used)
-        milvus::proto::schema::DataType::None,  // json_type (not used)
-        true                                    // strict_group_size
-    );
-    auto plan =
-        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
-    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-    auto ph_group =
-        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    auto search_result =
-        segment_growing_impl->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
-    CheckGroupBySearchResult(*search_result, topK, num_queries, true);
+        auto plan_str = handle.ParseGroupBySearch(
+            "",            // empty filter expression
+            "embeddings",  // vector field name
+            topK,          // topk
+            "L2",          // metric type
+            R"({"ef":10,"enable_search_path":true,"enable_search_path_k":100})",  // search params
+            int32_field_id.get(),                   // group_by_field_id
+            group_size,                             // group_size
+            "",                                     // json_path (not used)
+            milvus::proto::schema::DataType::None,  // json_type (not used)
+            true                                    // strict_group_size
+        );
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto searches_before =
+            milvus::monitor::internal_core_strict_group_phase2_batch_count
+                .Collect()
+                .histogram.sample_sum;
+        auto search_result = segment_growing_impl->Search(
+            plan.get(), ph_group.get(), MAX_TIMESTAMP);
+        CheckGroupBySearchResult(*search_result, topK, num_queries, true);
+        EXPECT_EQ(milvus::monitor::internal_core_strict_group_phase2_batch_count
+                          .Collect()
+                          .histogram.sample_sum -
+                      searches_before,
+                  num_queries == 1 ? topK : 0);
 
-    auto& group_by_values = search_result->group_by_values_.value();
-    auto size = group_by_values.size();
-    int expected_group_count = 100;
-    ASSERT_EQ(size, expected_group_count * group_size * num_queries);
-    int idx = 0;
-    for (int i = 0; i < num_queries; i++) {
-        std::unordered_map<int32_t, int> i32_map;
-        float lastDistance = 0.0;
-        for (int j = 0; j < expected_group_count * group_size; j++) {
-            if (std::holds_alternative<int32_t>(group_by_values[idx].value())) {
-                int32_t g_val = std::get<int32_t>(group_by_values[idx].value());
-                i32_map[g_val] += 1;
-                ASSERT_TRUE(i32_map[g_val] <= group_size);
-                auto distance = search_result->distances_.at(idx);
-                ASSERT_TRUE(
-                    lastDistance <=
-                    distance);  //distance should be decreased as metrics_type is L2
-                lastDistance = distance;
+        auto& group_by_values = search_result->group_by_values_.value();
+        auto size = group_by_values.size();
+        int expected_group_count = 100;
+        ASSERT_EQ(size, expected_group_count * group_size * num_queries);
+        int idx = 0;
+        for (int i = 0; i < num_queries; i++) {
+            std::unordered_map<int32_t, int> i32_map;
+            float lastDistance = 0.0;
+            for (int j = 0; j < expected_group_count * group_size; j++) {
+                if (std::holds_alternative<int32_t>(
+                        group_by_values[idx].value())) {
+                    int32_t g_val =
+                        std::get<int32_t>(group_by_values[idx].value());
+                    i32_map[g_val] += 1;
+                    ASSERT_TRUE(i32_map[g_val] <= group_size);
+                    auto distance = search_result->distances_.at(idx);
+                    ASSERT_TRUE(
+                        lastDistance <=
+                        distance);  //distance should be decreased as metrics_type is L2
+                    lastDistance = distance;
+                }
+                idx++;
             }
-            idx++;
-        }
-        ASSERT_EQ(i32_map.size(), expected_group_count);
-        for (const auto& map_pair : i32_map) {
-            ASSERT_EQ(group_size, map_pair.second);
+            ASSERT_EQ(i32_map.size(), expected_group_count);
+            for (const auto& map_pair : i32_map) {
+                ASSERT_EQ(group_size, map_pair.second);
+            }
         }
     }
 }

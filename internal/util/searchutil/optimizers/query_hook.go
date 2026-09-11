@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strconv"
 
 	"go.uber.org/zap"
@@ -135,25 +134,30 @@ func applyStrictGroupSettings(info *planpb.QueryInfo) (bool, error) {
 	if params == nil {
 		params = make(map[string]json.RawMessage)
 	}
-	_, hadThreshold := params[common.StrictGroupAcceptanceThresholdKey]
-	_, hadProbe := params[common.StrictGroupProbeCandidatesKey]
-	delete(params, common.StrictGroupAcceptanceThresholdKey)
-	delete(params, common.StrictGroupProbeCandidatesKey)
+	_, hadEnabled := params[common.EnableSearchPathKey]
+	_, hadK := params[common.EnableSearchPathKKey]
+	delete(params, common.EnableSearchPathKey)
+	delete(params, common.EnableSearchPathKKey)
+	// Retired controls must not reach the backend, even in a mixed-version plan.
+	_, hadOldThreshold := params["strict_group_acceptance_threshold"]
+	_, hadOldProbe := params["strict_group_probe_candidates"]
+	delete(params, "strict_group_acceptance_threshold")
+	delete(params, "strict_group_probe_candidates")
 	eligible := info.GetStrictGroupSize() && info.GetGroupSize() > 1 && info.GetGroupByFieldId() > 0
 	if eligible {
 		cfg := &paramtable.Get().QueryNodeCfg
-		threshold, err := strconv.ParseFloat(cfg.StrictGroupAcceptanceThreshold.GetValue(), 64)
-		if err != nil || math.IsNaN(threshold) || math.IsInf(threshold, 0) || threshold < 0 || threshold > 1 {
-			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupAcceptanceThreshold.Key)
+		enabled, err := strconv.ParseBool(cfg.EnableSearchPath.GetValue())
+		if err != nil {
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.EnableSearchPath.Key)
 		}
-		probe, err := strconv.ParseInt(cfg.StrictGroupProbeCandidates.GetValue(), 10, 64)
-		if err != nil || probe <= 0 {
-			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupProbeCandidates.Key)
+		minK, err := strconv.ParseInt(cfg.EnableSearchPathK.GetValue(), 10, 64)
+		if err != nil || minK <= 0 {
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.EnableSearchPathK.Key)
 		}
-		params[common.StrictGroupAcceptanceThresholdKey] = json.RawMessage(strconv.FormatFloat(threshold, 'g', -1, 64))
-		params[common.StrictGroupProbeCandidatesKey] = json.RawMessage(strconv.FormatInt(probe, 10))
+		params[common.EnableSearchPathKey] = json.RawMessage(strconv.FormatBool(enabled))
+		params[common.EnableSearchPathKKey] = json.RawMessage(strconv.FormatInt(minK, 10))
 	}
-	if !eligible && !hadThreshold && !hadProbe {
+	if !eligible && !hadEnabled && !hadK && !hadOldThreshold && !hadOldProbe {
 		return false, nil
 	}
 	encoded, err := json.Marshal(params)

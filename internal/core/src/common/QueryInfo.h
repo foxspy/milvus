@@ -35,8 +35,10 @@ struct SearchInfo {
     int64_t topk_{0};
     int64_t group_size_{1};
     bool strict_group_size_{false};
-    double strict_group_acceptance_threshold_{0.1};
-    int64_t strict_group_probe_candidates_{100};
+    bool enable_search_path_{false};
+    int64_t enable_search_path_k_{1};
+    // Internal flag, never serialized to Knowhere.
+    bool is_group_search_{false};
     int64_t round_decimal_{0};
     FieldId field_id_;
     MetricType metric_type_;
@@ -50,6 +52,33 @@ struct SearchInfo {
     std::optional<milvus::DataType> json_type_;
     bool strict_cast_{false};
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
+
+    SearchInfo
+    ForGroupSearch() const {
+        auto info = *this;
+        info.topk_ = group_size_;
+        info.round_decimal_ = -1;
+        info.group_by_field_id_.reset();
+        info.strict_group_size_ = false;
+        info.iterative_filter_execution = false;
+        info.iterator_v2_info_.reset();
+        info.materialized_view_involved = false;
+        info.is_group_search_ = true;
+        if (info.search_params_.is_null()) {
+            info.search_params_ = knowhere::Json::object();
+        }
+        for (const auto* key : {"ef",
+                                "search_list_size",
+                                "search_list",
+                                "iterator_ef",
+                                "iterator_refine_ratio",
+                                "retain_iterator_order",
+                                "hints",
+                                "materialized_view_search_info"}) {
+            info.search_params_.erase(key);
+        }
+        return info;
+    }
 
     bool
     element_level() const {

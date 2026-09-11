@@ -134,7 +134,8 @@ VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) {
         searchParam.search_params_[knowhere::meta::BM25_AVGDL] =
             searchInfo.search_params_[knowhere::meta::BM25_AVGDL];
     }
-    return searchParam;
+    return searchInfo.is_group_search_ ? searchParam.ForGroupSearch()
+                                       : searchParam;
 }
 
 }  // namespace milvus::segcore
