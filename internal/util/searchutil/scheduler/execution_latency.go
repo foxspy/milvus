@@ -13,6 +13,22 @@ const (
 	executionLatencyGrowthDivisor = 20
 )
 
+// scaleAdmissionEstimate applies the validated positive, finite multiplier only
+// to admission decisions, never to the successful execution samples themselves.
+func scaleAdmissionEstimate(estimate time.Duration, ratio float64) time.Duration {
+	if ratio == 1 {
+		return estimate
+	}
+	scaled := math.Ceil(float64(estimate) * ratio)
+	if scaled >= float64(math.MaxInt64) {
+		return time.Duration(math.MaxInt64)
+	}
+	if scaled < 1 {
+		return time.Nanosecond
+	}
+	return time.Duration(scaled)
+}
+
 // Inclusive duration bounds limit rounding up to 5%, including nanosecond
 // durations. Integer arithmetic avoids floating point errors and overflow.
 var executionLatencyBounds = func() []time.Duration {

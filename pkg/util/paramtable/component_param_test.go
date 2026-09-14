@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -914,6 +915,22 @@ func TestQueryNodeDynamicDeadlineConfig(t *testing.T) {
 	for _, value := range []string{"0", "-1", "1.1", "NaN", "+Inf", "invalid"} {
 		assert.NoError(t, params.Save(ratio.Key, value))
 		assert.Zero(t, ratio.GetAsFloat())
+	}
+}
+
+func TestQueryNodeAdmissionRatioConfig(t *testing.T) {
+	Init()
+	params := Get()
+	ratio := &params.QueryNodeCfg.AdmissionRatio
+	defer params.Reset(ratio.Key)
+	assert.Equal(t, 1.0, ratio.GetAsFloat())
+	for _, value := range []float64{0.5, 1, 2, 3, 1e100} {
+		assert.NoError(t, params.Save(ratio.Key, fmt.Sprint(value)))
+		assert.Equal(t, value, ratio.GetAsFloat())
+	}
+	for _, value := range []string{"0", "-1", "NaN", "+Inf", "-Inf", "1e999", "invalid", ""} {
+		assert.NoError(t, params.Save(ratio.Key, value))
+		assert.Equal(t, 1.0, ratio.GetAsFloat(), "invalid multiplier %q must preserve the unscaled estimate", value)
 	}
 }
 

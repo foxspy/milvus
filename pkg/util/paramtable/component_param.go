@@ -19,6 +19,7 @@ package paramtable
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -3538,6 +3539,7 @@ type queryNodeConfig struct {
 	EnableDynamicDeadline        ParamItem `refreshable:"true"`
 	SchedulerTimeWindow          ParamItem `refreshable:"true"`
 	SuccessLatencyRatio          ParamItem `refreshable:"true"`
+	AdmissionRatio               ParamItem `refreshable:"true"`
 	MaxGroupNQ                   ParamItem `refreshable:"true"`
 	NQMergeRatio                 ParamItem `refreshable:"true"`
 	MaxDeadlineMergeGap          ParamItem `refreshable:"true"`
@@ -4573,6 +4575,22 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export: true,
 	}
 	p.SuccessLatencyRatio.Init(base.mgr)
+
+	p.AdmissionRatio = ParamItem{
+		Key:          "queryNode.scheduler.admissionRatio",
+		Version:      "2.6.24",
+		DefaultValue: "1.0",
+		Formatter: func(v string) string {
+			ratio, err := strconv.ParseFloat(v, 64)
+			if err != nil || !(ratio > 0) || math.IsInf(ratio, 0) {
+				return "1.0"
+			}
+			return v
+		},
+		Doc:    "Multiplier applied to the successful execution latency quantile to obtain the final admission threshold. For example, 0.5 halves the required remaining budget, while 2 or 3 requires twice or three times the budget. Supports hot updates without changing retained samples or admitted tasks' deadlines. Must be finite and positive; invalid values fall back to 1.0. Rounded up to at least 1ns and saturated at the maximum duration on overflow.",
+		Export: true,
+	}
+	p.AdmissionRatio.Init(base.mgr)
 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",

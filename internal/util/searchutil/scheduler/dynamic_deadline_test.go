@@ -41,6 +41,7 @@ func configureDynamicDeadline(t *testing.T) {
 		{&params.QueryNodeCfg.EnableDynamicDeadline, "true"},
 		{&params.QueryNodeCfg.SchedulerTimeWindow, "15s"},
 		{&params.QueryNodeCfg.SuccessLatencyRatio, "0.9"},
+		{&params.QueryNodeCfg.AdmissionRatio, "1.0"},
 	} {
 		old := setting.item.GetValue()
 		require.NoError(t, params.Save(setting.item.Key, setting.value))
@@ -475,6 +476,15 @@ func TestDynamicDeadlineRatioUpdateWithInFlightTask(t *testing.T) {
 	require.NoError(t, params.Save(params.QueryNodeCfg.SuccessLatencyRatio.Key, "0.99"))
 	_, err = s.executeTask(probe)
 	require.ErrorIs(t, err, context.DeadlineExceeded, "P99 rejects again using retained samples")
+	// Multiplier changes also affect subsequent checks without interrupting
+	// the old execution or rewriting the retained successful durations.
+	require.NoError(t, params.Save(params.QueryNodeCfg.SuccessLatencyRatio.Key, "0.1"))
+	require.NoError(t, params.Save(params.QueryNodeCfg.AdmissionRatio.Key, "3"))
+	_, err = s.executeTask(probe)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "three times P10 rejects the same budget")
+	require.NoError(t, params.Save(params.QueryNodeCfg.AdmissionRatio.Key, "0.5"))
+	_, err = s.executeTask(probe)
+	require.ErrorIs(t, err, probeErr, "half P10 admits the same budget")
 	releaseTask()
 	require.NoError(t, <-done)
 	// The old execution adds a short sample; the second of 11 samples remains 1s.

@@ -311,6 +311,35 @@ var (
 			outcomeLabelName,
 		})
 
+	QueryNodeReadTaskAdmissionThreshold = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_admission_threshold",
+			Help:      "Final admission threshold in milliseconds, after applying admissionRatio. Observed once per deadline admission check with a valid estimate, including rejected tasks.",
+			Buckets:   subMsBuckets,
+		}, []string{nodeIDLabelName, queryTypeLabelName},
+	)
+
+	QueryNodeReadTaskAdmissionThresholdCurrent = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_admission_threshold_current",
+			Help:      "Most recently evaluated final admission threshold in milliseconds, after applying admissionRatio. Updated on task evaluation; zero when disabled or the evaluated window has no estimate. Idle values are not recomputed until the next evaluation.",
+		}, []string{nodeIDLabelName, queryTypeLabelName},
+	)
+
+	QueryNodeReadTaskAdmissionRemainingDeadline = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_admission_remaining_deadline",
+			Help:      "Remaining request deadline budget in milliseconds, measured when a worker is available and compared with the final admission threshold. Observed for the same checks as read_task_admission_threshold, including rejected tasks. A deadline that expires during the check contributes zero.",
+			Buckets:   subMsBuckets,
+		}, []string{nodeIDLabelName, queryTypeLabelName},
+	)
+
 	QueryNodeReadTaskConcurrency = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -928,6 +957,9 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeReadTaskReadyNQ)
 	registry.MustRegister(QueryNodeReadTaskQueueDuration)
 	registry.MustRegister(QueryNodeReadTaskExecuteDuration)
+	registry.MustRegister(QueryNodeReadTaskAdmissionThreshold)
+	registry.MustRegister(QueryNodeReadTaskAdmissionThresholdCurrent)
+	registry.MustRegister(QueryNodeReadTaskAdmissionRemainingDeadline)
 	registry.MustRegister(QueryNodeReadTaskConcurrency)
 	registry.MustRegister(QueryNodeEstimateCPUUsage)
 	registry.MustRegister(QueryNodeSearchGroupNQ)

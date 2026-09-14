@@ -189,6 +189,7 @@ func (s *scheduler) watchDynamicDeadline() {
 			s.deadlineGeneration++
 			s.searchLatencies.reset()
 			s.queryLatencies.reset()
+			s.resetAdmissionThresholdMetrics()
 		}
 	}
 	s.deadlineHandler = config.NewHandler(fmt.Sprintf("qn.scheduler.dynamicDeadline.%p", s), func(*config.Event) { update() })
@@ -203,6 +204,7 @@ func (s *scheduler) unwatchDynamicDeadline() {
 	s.deadlineMu.Lock()
 	defer s.deadlineMu.Unlock()
 	s.deadlineEnabled = false
+	s.resetAdmissionThresholdMetrics()
 	s.deadlineGeneration++
 	s.searchLatencies.reset()
 	s.queryLatencies.reset()
@@ -367,12 +369,15 @@ func (s *scheduler) exec() {
 
 // executeTask checks admission only after a pool worker is available, including
 // all queue and worker wait in the remaining request budget. The successful
-// execution quantile estimates the time needed; it never changes the deadline.
+// execution quantile, scaled by admissionRatio, estimates the time needed; it
+// never changes the deadline.
 // Rejected tasks do not enter Execute or contribute execution metrics/samples.
 func (s *scheduler) executeTask(t Task) (time.Duration, error) {
 	latencies := &s.queryLatencies
+	queryType := metrics.QueryLabel
 	if t.IsSearch() {
 		latencies = &s.searchLatencies
+		queryType = metrics.SearchLabel
 	}
 	var estimate time.Duration
 	var ok bool
@@ -383,14 +388,36 @@ func (s *scheduler) executeTask(t Task) (time.Duration, error) {
 		window := cfg.SchedulerTimeWindow.GetAsDurationByParse()
 		ratio := cfg.SuccessLatencyRatio.GetAsFloat()
 		estimate, ok = latencies.quantile(window, ratio)
+		if ok {
+			estimate = scaleAdmissionEstimate(estimate, cfg.AdmissionRatio.GetAsFloat())
+		}
 	}
+	// Keep metric updates under deadlineMu so disabling cannot be followed by
+	// an in-flight evaluation publishing a stale nonzero threshold.
+	thresholdMS := float64(0)
+	if ok {
+		thresholdMS = float64(estimate) / float64(time.Millisecond)
+	}
+	metrics.QueryNodeReadTaskAdmissionThresholdCurrent.WithLabelValues(
+		paramtable.GetStringNodeID(), queryType,
+	).Set(thresholdMS)
 	ctx := t.Context()
 	admissionErr := ctx.Err()
 	if deadline, hasDeadline := ctx.Deadline(); admissionErr == nil && ok && hasDeadline {
-		if remaining := time.Until(deadline); remaining < estimate {
+		// Sample once so the comparison, error and histogram use the same
+		// remaining budget. Clamping an elapsed deadline to zero preserves the
+		// rejection decision and keeps the histogram sum nondecreasing.
+		remaining := max(time.Duration(0), time.Until(deadline))
+		if remaining < estimate {
 			admissionErr = fmt.Errorf("insufficient time before Execute (remaining %s, estimated execution %s): %w",
 				remaining, estimate, context.DeadlineExceeded)
 		}
+		metrics.QueryNodeReadTaskAdmissionThreshold.WithLabelValues(
+			paramtable.GetStringNodeID(), queryType,
+		).Observe(thresholdMS)
+		metrics.QueryNodeReadTaskAdmissionRemainingDeadline.WithLabelValues(
+			paramtable.GetStringNodeID(), queryType,
+		).Observe(float64(remaining) / float64(time.Millisecond))
 	}
 	s.deadlineMu.RUnlock()
 	if admissionErr != nil {
@@ -420,6 +447,14 @@ func (s *scheduler) executeTask(t Task) (time.Duration, error) {
 		s.deadlineMu.RUnlock()
 	}
 	return executeDuration, err
+}
+
+func (s *scheduler) resetAdmissionThresholdMetrics() {
+	for _, queryType := range []string{metrics.SearchLabel, metrics.QueryLabel} {
+		metrics.QueryNodeReadTaskAdmissionThresholdCurrent.WithLabelValues(
+			paramtable.GetStringNodeID(), queryType,
+		).Set(0)
+	}
 }
 
 func (s *scheduler) getPool(t Task) *conc.Pool[any] {
